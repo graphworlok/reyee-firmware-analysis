@@ -1,0 +1,10 @@
+# Never commit firmware images, extracted rootfs trees or binaries.
+*.bin
+*.tar
+*.tar.gz
+*.squashfs
+*.elf
+*.so
+rootfs*/
+fw*/
+binaries/
