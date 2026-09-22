@@ -128,7 +128,11 @@ the `snprintf` widths the esw hello handler uses when copying each field
 out, which independently corroborate the names taken from the validator
 (§7) — the two agree everywhere they overlap.
 
-| offset | size | field | guarded (esw) | guarded (eap) |
+The two **guarded** columns describe **2.430 (RG-EG1510XS) only.** In
+2.380 and 2.388 (RG-EG105GW(T)) no field is guarded on either path —
+see §7 and §8.
+
+| offset | size | field | guarded (esw, 2.430) | guarded (eap, 2.430) |
 |---|---|---|---|---|
 | `+0x000` | 4 | **`msg_type`** (`ntohl`) | — | — |
 | `+0x004` | 4 | `mid` — message id, used for duplicate suppression (`ntohl`) | — | — |
@@ -159,41 +163,58 @@ Recovered from the eap dispatcher's switch (`FUN_00412d98`). **15
 accepted values across 12 distinct handlers**; anything else is dropped
 with *"resv unknown msg type"* at `eap_disc.c:1175`.
 
-| `msg_type` | handler | notes |
-|---|---|---|
-| `0x10` | `FUN_004127a0` | also reached by `0x1010` |
-| `0x11` | `FUN_004126b4` | |
-| `0x12` | `FUN_00411e40` | also reached by `0x1012` |
-| `0x20` | `FUN_00411d98` | |
-| `0x30` | `FUN_00411a84` | |
-| **`0x40`** | `FUN_0041198c` | **HELLO** — logs *"Receive hello msg from %s"* |
-| `0x50`, `0x51` | `FUN_00412ac4` | receives the trailing variable payload |
-| **`0x61`** | `FUN_004165f8` | **`DISC_MSG_TPYE_SH`** — carries a command (§6) |
-| **`0x62`** | `FUN_00416864` | **`DISC_MSG_TPYE_SH_RSP`** — the response form |
-| `0x65` | `FUN_00412cac` | |
-| `0x66` | `FUN_00412d24` | receives the trailing payload |
-| `0x70` | `FUN_00412c08` | receives the trailing payload only |
-| `0x1010` | → `0x10` | alias |
-| `0x1012` | → `0x12` | alias |
+| `msg_type` | handler name | aarch64 addr | notes |
+|---|---|---|---|
+| `0x10` | `eap_disc_handle_declare_msg` | `FUN_004127a0` | also reached by `0x1010` |
+| `0x11` | `eap_disc_handle_reject_msg` | `FUN_004126b4` | |
+| `0x12` | `eap_disc_handle_join_msg` | `FUN_00411e40` | also reached by `0x1012` |
+| `0x20` | `eap_disc_handle_conflict_msg` | `FUN_00411d98` | |
+| `0x30` | `eap_disc_handle_merge_msg` | `FUN_00411a84` | |
+| **`0x40`** | `eap_disc_handle_hello_msg` | `FUN_0041198c` | **HELLO** — logs *"Receive hello msg from %s"* |
+| `0x50`, `0x51` | `eap_disc_handle_setip_msg` | `FUN_00412ac4` | receives the trailing variable payload |
+| **`0x61`** | `sh_handle_sh` | `FUN_004165f8` | **`DISC_MSG_TPYE_SH`** — carries a command (§6) |
+| **`0x62`** | `sh_handle_sh_rsp` | `FUN_00416864` | **`DISC_MSG_TPYE_SH_RSP`** — the response form |
+| `0x65` | `eap_disc_handle_option_msg` | `FUN_00412cac` | |
+| `0x66` | `eap_disc_handle_option_rsp_msg` | `FUN_00412d24` | receives the trailing payload |
+| `0x70` | `eap_disc_handle_sync_pwd_msg` | `FUN_00412c08` | receives the trailing payload only |
+| `0x1010` | → `0x10` | | alias |
+| `0x1012` | → `0x12` | | alias |
 
-**On the naming.** The MIPS builds (2.380/2.388) retain handler-name
-strings absent from the aarch64 build:
-`eap_disc_handle_{hello,join,declare,conflict,merge,option,option_rsp,reject,setip,sync_pwd}_msg`
-and `esw_disc_handle_hello_msg`. That is ten eap names for twelve
-handlers, and the strings are not adjacent to the numeric constants, so
-**the full name↔value mapping is not recoverable from the binaries
-alone**. Only three edges are anchored, and only those are asserted
-here: `0x40` = hello (from its own log string), `0x61` = SH, `0x62` =
-SH_RSP (from the log strings inside the dispatcher). The remaining names
-are listed as a set, deliberately unmapped. A vendor with the source can
-close this in minutes.
+**On the naming — resolved, 2026-09-20.** The name↔value mapping in
+the table above is now **fully recovered** and no longer inferred. The
+2.380/2.388 MIPS builds are *not* stripped: they retain a complete
+`.dynsym` with 769 named functions, including `eap_msg_handle` and every
+`eap_disc_handle_*_msg`. In those builds the dispatcher's switch calls
+its handlers through local GOT slots at `0x4b3984`–`0x4b39b0`, and
+reading the pointer stored in each slot names the handler for each case
+directly:
 
-The aarch64 build's lack of these strings is **not** evidence that the
-handlers are absent there: it retains the `ERROR in %s [%d]` /
-`WARNING in %s [%d]` macros and nine other `_disc_` function-name
-strings, so this is a same-version cross-architecture build difference,
-most likely in how `__func__` is referenced. It has not been confirmed
-either way and no conclusion is drawn from it.
+```
+0x70   -> eap_disc_handle_sync_pwd_msg      0x0041ee2c
+0x10   -> eap_disc_handle_declare_msg       0x0041e6c8   (also 0x1010)
+0x11   -> eap_disc_handle_reject_msg        0x0041e518
+0x12   -> eap_disc_handle_join_msg          0x0041d700   (also 0x1012)
+0x20   -> eap_disc_handle_conflict_msg      0x0041d5e8
+0x30   -> eap_disc_handle_merge_msg         0x0041d090
+0x40   -> eap_disc_handle_hello_msg         0x0041ced4
+0x50/1 -> eap_disc_handle_setip_msg         0x0041ec18
+0x61   -> sh_handle_sh                      0x004250c4
+0x62   -> sh_handle_sh_rsp                  0x0042553c
+0x65   -> eap_disc_handle_option_msg        0x0041ef5c
+0x66   -> eap_disc_handle_option_rsp_msg    0x0041f024
+```
+
+The table is **byte-identical in 2.380 and 2.388**. The three edges that
+were previously anchored independently — `0x40` = hello, `0x61` = SH,
+`0x62` = SH\_RSP, each from its own log string — all agree with the
+recovered table, which is the check that the method is sound. Note the
+`0x61`/`0x62` handlers are named `sh_handle_sh` / `sh_handle_sh_rsp` and
+live in `protocol/protocol.c`, not in the `eap_disc_*` family; that is
+why there were ten `eap_disc_handle_*` names for twelve handlers.
+
+The aarch64 addresses in the table are carried over by matching each
+handler's position in the 2.430 dispatcher's switch, which has the same
+case structure. **[proven for MIPS, [inferred] for the aarch64 column.]**
 
 `esw` (43562) accepts only `0x40`, per the receive-path analysis
 recorded in `cve-2021-35394-ecosystem`, `analysis/geico/README.md`
@@ -256,10 +277,15 @@ field drops the entire message before the type switch runs:
 
 The character set is a **blocklist of shell metacharacters**, which
 tells you what the fields were historically interpolated into. It is
-present and called on both ports in 2.430. `liblib_c.so` is
-byte-identical between 2.380 and 2.388 and contains
-`param_safety_check` in both; **whether those builds' easydisc actually
-calls it on the esw hello path is untested** — see §10.
+present and called on both ports in 2.430.
+
+**In 2.380 and 2.388 it is not called on either discovery path.**
+*(Established 2026-09-20.)* `liblib_c.so` is byte-identical between
+those two builds and exports `param_safety_check` in both, so the
+validator is available — `easyson.elf` simply never calls it from the
+eap or esw dispatchers. The ✓ columns in §4 therefore describe **2.430
+only**; for the EG105GW builds every cell in both columns is empty.
+Derivation and method in §8. **[proven]**
 
 ## 8. Observed exploitation
 
@@ -316,6 +342,51 @@ dropped before the type switch. A second barrier sits behind that: the
 merge consumer `FUN_004147fc` hands its result to `son_utils_safe_exec`,
 which is `pipe`/`fork`/`dup2`/**`execvp(argv[0], argv)`** — argv-style,
 no shell, nothing for a quote break-out to break out of.
+
+**On 2.380 / 2.388 the first barrier is absent.** *(Established
+2026-09-20.)* The validator gate described above is a property of the
+2.430 build only. In both MIPS builds — RG-EG105GW(T), ReyeeOS 2.380 and
+2.388 — `param_safety_check` is imported and called, but **never from
+the discovery code**. Exhaustively, across the whole executable segment:
+
+| build | `param_safety_check` call sites | on the eap/esw disc path? |
+|---|---|---|
+| 2.430 aarch64 (RG-EG1510XS) | 16, in 12 functions | **yes** — `FUN_004151fc` (esw hello) → `FUN_004150bc` → `FUN_0041504c` → `param_safety_check`; and `FUN_00411138` on the eap side |
+| 2.380 MIPS (RG-EG105GW(T)) | 11, in 7 functions | **no** |
+| 2.388 MIPS (RG-EG105GW(T)) | 11, in 7 functions | **no** |
+
+In the MIPS builds the 11 sites are in `group_reload_uf_cb`,
+`network_set_networkid_uf_cb`, `network_device_move_uf_cb`,
+`enetCap_set_cb`, `enetCap_del_cb`, `enetCap_get_cb` and five sites in
+static functions in the master / neighbor / enet\_network regions. **Not
+one falls inside the discovery code** (`0x41b728`–`0x4273e0`).
+Enumerating callees directly confirms it: `esw_disc_msg_handler`,
+`esw_disc_handle_hello_msg`, `eap_msg_handle` and
+`eap_disc_handle_hello_msg` call neither `param_safety_check` nor
+`utils_param_safe_check` — `esw_disc_handle_hello_msg`'s only
+input-inspecting callees are `son_check_ipv4`, `strcmp`, `strncmp` and
+`strlen`. **[proven]**
+
+The consequence is direct: **the single check that rejects geico's
+packet on 2.430 — the leading `'` hitting the blocklist — does not exist
+on the esw hello path in either EG105GW build.** The packet is not
+dropped there.
+
+This does *not* by itself make those builds exploitable, and no such
+claim is made: the second barrier (§8, below) is a separate question that
+was not settled in this pass, and no device was tested. What it does
+establish is that the validation coverage **differs between shipping
+Reyee builds**, which was previously listed as untested in §10 — and that
+geico's packet was plausibly developed against something in the
+EG105GW family rather than against a hypothetical older build.
+
+**One caveat, stated because it bounds the claim.** These three images
+are 2.430/aarch64/EG1510XS versus 2.380 and 2.388/MIPS/EG105GW, so
+**version, architecture and product line still vary together**. The
+correct reading is "absent in both EG105GW builds examined, present in
+the EG1510XS build examined" — *not* "removed in older firmware" and
+*not* "a MIPS-specific defect". Separating those requires an image this
+analysis does not have: an EG105GW at 2.430, or an EG1510XS at 2.380.
 
 So this is an **n-day against unpatched or differently-configured
 devices, not a 0-day against current firmware.** It is reported here
@@ -387,14 +458,14 @@ What is **not** established, and is not claimed:
 - **That any shipping build is exploitable.** On 2.430 the observed
   packet is rejected twice over. No vulnerable build has been
   identified.
-- **Which builds, if any, lack the validation.** `liblib_c.so` contains
-  `param_safety_check` in 2.380 and 2.388, but whether easydisc *calls*
-  it on the esw hello path in those builds is untested. The binaries are
-  stripped MIPS o32; naive approaches (`readelf -s`, `jal`-target
-  scanning, Ghidra xrefs) each return false negatives on them, so a
-  negative result from those methods should not be trusted. The sound
-  test is to resolve the `$gp`-relative GOT offset for
-  `param_safety_check` and count `lw $t9,off($gp)` / `jalr $t9` sites.
+- ~~**Which builds, if any, lack the validation.**~~ **Resolved
+  2026-09-20 — see §8.** Both EG105GW builds (2.380, 2.388) call
+  `param_safety_check` 11 times, none of them on the eap or esw
+  discovery path; the EG1510XS build (2.430) calls it 16 times including
+  both disc dispatchers. The first barrier against geico's packet is
+  therefore absent on the EG105GW builds. What remains *not* established
+  is whether that makes them exploitable — the second barrier was not
+  settled, and no device was tested.
 - **That this maps to a known CVE.** It matches no published Ruijie
   advisory we can find — CVE-2021-43162/43163 (HTTP/luci),
   CVE-2023-7330 (upload), CVE-2024-47146 (MQTT), CVE-2025-34057
@@ -406,8 +477,12 @@ What is **not** established, and is not claimed:
 
 Suggested questions for the vendor, in priority order:
 
-1. In which ReyeeOS versions and product lines does the esw hello path
-   call `param_safety_check` on `networkId`? Was it always there?
+1. The esw hello path calls `param_safety_check` on `networkId` in
+   2.430 (RG-EG1510XS) but **not** in 2.380 or 2.388 (RG-EG105GW(T)) —
+   see §8. Which is intended? Specifically: is the check a fix added
+   after 2.388, or is the EG105GW line built from a branch that never
+   had it? An EG105GW image at 2.430, or an EG1510XS image at 2.380,
+   would settle it immediately and we do not have either.
 2. What authorises a `0x61` / `DISC_MSG_TPYE_SH` message, end to end,
    from datagram to `enet_disp.elf` execution?
 3. What is the scope of the embedded `esw_networkId_merge` password —
@@ -429,7 +504,48 @@ Suggested questions for the vendor, in priority order:
   references; decoding those pairs out of `.text` directly recovers
   them. Ghidra string xrefs *do* resolve in the aarch64 build and were
   used throughout.
-- On the MIPS builds, instruction-level search returned
-  `instructions_scanned: 0` in this project — those programs are
-  imported but not disassembled. Treat any "not found" from instruction
-  search on them as a tooling result, not a finding.
+- **Corrected 2026-09-20 — the MIPS builds are not stripped.** Earlier
+  notes in this file described them as "stripped MIPS o32". They are
+  not: `easyson_2380.elf` and `easyson_2388.elf` carry a `.dynsym` of
+  587 entries, **549 of them named functions with addresses**, including
+  `eap_msg_handle`,
+  `esw_disc_handle_hello_msg` and every `eap_disc_handle_*_msg`. Their
+  *section headers* are stripped, which is why `readelf -s` and
+  section-based tooling come up empty — parse `PT_DYNAMIC` instead and
+  the names are all there. This is what made §5 and §8 resolvable.
+- **`instructions_scanned: 0` from Ghidra's instruction search on those
+  programs is a tool bug, not missing disassembly.** The programs *are*
+  analysed and `decompile_function` returns correct C for them. Do not
+  conclude "not disassembled" from that counter, and do not re-run
+  analysis on its account.
+- **The `lw $t9,off($gp)` / `jalr $t9` test named in earlier versions of
+  §10 is itself a false-negative generator — do not use it.** These
+  builds are compiled without optimisation, and the call idiom is:
+
+  ```
+  lw    v0, -30704(gp)      # GOT slot for the callee
+  nop
+  addu  t9, v0, zero        # *then* move into t9
+  jalr  ra, t9
+  ```
+
+  The GOT slot is loaded into `$v0`, not `$t9`. Across `easyson_2380.elf`
+  there are **7,567 `jalr $t9` but only 218 `lw $t9,off($gp)`** — the
+  suggested test would have missed roughly 97% of all calls and returned
+  a confident, wrong "not called". The sound test is to scan for
+  `lw <any reg>, off($gp)` and resolve `$gp + off` against the GOT.
+- **Resolving the GOT, concretely.** From `PT_DYNAMIC`:
+  `DT_PLTGOT = 0x4b37b0`, `DT_MIPS_LOCAL_GOTNO = 0x177`,
+  `DT_MIPS_GOTSYM = 0x172`, so `$gp = DT_PLTGOT + 0x7ff0 = 0x4bb7a0`
+  (confirmed against the `lui gp / addiu gp / addu gp,gp,t9` prologue,
+  which computes exactly that). External GOT slots begin at
+  `DT_PLTGOT + LOCAL_GOTNO*4 = 0x4b3d8c`; slot *i* ≥ `LOCAL_GOTNO`
+  corresponds to `dynsym[GOTSYM + (i - LOCAL_GOTNO)]`. Slots *below*
+  that boundary are local entries holding internal addresses — which is
+  how the §5 handler table was read. Both MIPS builds share the same
+  `$gp` and the same slot addresses.
+- Sanity-check any such scan against a symbol whose call count you can
+  predict. `snprintf` resolves to 385 sites in 75 functions, 13 of them
+  in `esw_disc_handle_hello_msg` — which matches that function's
+  decompilation exactly. A scan that returns zero for `snprintf` is
+  broken, which is precisely how the bad `$t9` test was caught.

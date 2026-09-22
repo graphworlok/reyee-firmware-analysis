@@ -327,7 +327,8 @@ The two validators are **different implementations, not wrappers**:
 |---|---|---|
 | rejects | `&` `\|` `;` `$` `<` `>` `'` `` ` `` CR LF | `&` `\|` `;` `$` `>` `'` `` ` `` CR LF **`.`** **`/`** |
 | misses | **`.`** **`/`** `\` whitespace `*` `?` `~` `(` `)` `"` | `<` `\` whitespace `*` `?` `~` `(` `)` `"` |
-| xrefs | 16 | 2 |
+| xrefs (2.430 aarch64) | 16 | 2 |
+| xrefs (2.380 / 2.388 MIPS) | 11 | 2 |
 
 The widely used one is **shell-metacharacter-only and does not prevent
 path traversal**: a field that clears `param_safety_check` may still
@@ -485,6 +486,57 @@ in the meaningful sense — the attacker supplies credentials anyone can
 extract. It has **not** been executed or tested against a device; the
 chain is established statically.
 
+### 3.13 Validation coverage differs between shipping builds
+
+*(Established 2026-09-20.)* §3.8 measured the shell-exec-versus-validation
+ratio on 2.430. Repeating that measurement on the MIPS builds shows the
+validation side is not even constant across the product range.
+**[proven]**
+
+| build | product | `param_safety_check` sites | on the eap/esw discovery path? |
+|---|---|---|---|
+| 2.430 aarch64 | RG-EG1510XS | 16, in 12 functions | **yes** (both disc dispatchers) |
+| 2.380 MIPS | RG-EG105GW(T) | 11, in 7 functions | **no** |
+| 2.388 MIPS | RG-EG105GW(T) | 11, in 7 functions | **no** |
+
+`liblib_c.so` is byte-identical between 2.380 and 2.388 and exports the
+validator in both, so this is not a library difference — it is a
+difference in what `easyson.elf` chooses to call. The full derivation,
+the per-function breakdown and the method (including the two false-
+negative traps that make a naive scan report the opposite) are in
+[`easydisc-protocol.md`](easydisc-protocol.md) §8 and §11.
+
+The defensive consequence is the one in §3.8, sharpened: the guarded
+sink is not merely outnumbered by unguarded ones, **the guard itself is
+present on the discovery path in one shipping product line and absent in
+the other.** An operator cannot assume a control observed in one Reyee
+model exists in the next.
+
+Version, architecture and product line vary together across these three
+images, so this does **not** establish "removed in older firmware" or "a
+MIPS-specific defect". It establishes divergence, and that is the
+question for the vendor.
+
+**A lead, explicitly not a finding.** While mapping the merge paths in
+2.380, a static function at `0x0045ace4` (immediately after
+`network_merge_uf_handle`, in `enet_network/network_merge.c`) was seen to
+build the esw auto-merge command with the password **baked into the
+format string as a literal** rather than via `%s`:
+
+```
+dev_sta set -m esw_networkId_merge '{"password":"U2FsdGVkX18POF0/...","type":"enc",
+  "fromSn":[],"fromNetworkId":"0","toNetworkId":"%s","toNetworkName":"%s",
+  "toParentId":"%s"}' &
+```
+
+It parses JSON, interpolates three `%s` inside single quotes, and calls
+**`system()`** — and it does not call either validator. The 2.430 build
+reaches the equivalent template through `son_utils_safe_exec` (argv,
+`execvp`) in the path documented at `easydisc-protocol.md` §9. **Whether
+any attacker-influenced field reaches `0x0045ace4`, and by what route,
+was not traced and is not claimed.** It is recorded so the next reader
+starts here rather than rediscovering it.
+
 ## 4. Recommendations
 
 **For an operator running this gear now** (in priority order):
@@ -552,9 +604,17 @@ chain is established statically.
   cannot be read from the image.
 - **The MIPS PSK question is open** (§3.3) and is not asserted in either
   direction.
-- **Whether a network-controlled field reaches `curl … -o '%s'`** is
-  unestablished (§3.9); the traversal gap is a property of the validator,
-  not a demonstrated path.
+- **The `curl … -o '%s'` path-traversal hypothesis is withdrawn, not
+  open** (§3.9, §3.11): the `-o` argument is a hardcoded
+  `"/tmp/image.tar.gz"` literal, so no field reaches it. The traversal
+  gap remains a real property of `param_safety_check` (it rejects no
+  `.` or `/`), but no path exercising it has been demonstrated. The
+  serious defect found while chasing it is the *other* two `%s` in that
+  same template — §3.12.
+- **The `0x0045ace4` MIPS merge lead is untraced** (§3.13). That it uses
+  `system()` with an embedded credential and no validator is read out of
+  the binary; that anything attacker-controlled reaches it is **not**
+  established, and no reachability claim is made.
 - These are **three images of two products**. Other Reyee models,
   and configurations other than default, were not examined — most
   relevantly, models whose WAN posture may differ.
