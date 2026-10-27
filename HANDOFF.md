@@ -7,7 +7,9 @@ recovery image) and the low-cost **RG-EG105G-V2** stream (2.248/2.280/
 2.300/2.340) decrypted and compared — EG105G-V2 2.248 reproduces the
 2.248 `system()`-sink merge RCE on MIPS (sink now **proven**,
 `FUN_00417da8`), and the EG1510XS recovery image introduced a new
-`upgrade_crypt_boot!@2024` U-boot container tracked as open lead §3.16.
+flagship found to boot an **unsigned (hash-only) kernel** behind an
+**unauthenticated HTTP/TFTP recovery** fetch (§3.16), plus a new
+`upgrade_crypt_boot!@2024` U-boot container.
 Earlier on 2026-10-27: the fourth image (ReyeeOS 2.248, RG-EG305GH-E,
 §3.14) and **seven more vendor bundles** — RG-EG305GH-E 2.388/2.410/2.430,
 a third product line RG-EG210G-P-V3 2.388/2.410/2.430, and an
@@ -125,13 +127,26 @@ Do not re-derive these:
   product lines, not one image; EG105G-V2 is the low-cost hardware-verify
   target. 2.248/2.280/2.300 are **`encrypto_v1`** (XOR, `tools/xor.py` +
   fix first 6 bytes to `sysupg`, then carve `hsqs`); 2.340 + EG1510XS are
-  v2. **§3.16 open lead:** EG1510XS latest ships a `..._install_recovery_
-  encrypto.bin` with new magic **`upgrade_crypt_boot!@2024`** (raw, not
-  base64), handled **only in U-boot** (decrypt `u-boot-eg1510xs_encrypto_v2`
-  with fwdec → plaintext has `crypt_boot!@2024`, no `BR0kh`, no RSA, but
-  `system_recovery`/`cloud_recovery` with server-supplied-sha256-over-wget
-  and TFTP `rgos.bin` from 192.168.64.1). NOT traced — whether secure boot
-  / recovery auth is enforced is the next Ghidra job.
+  v2. **§3.16 (now a finding, not a lead):** EG1510XS flagship **boots an
+  unsigned kernel**. Kernel FIT (`xs430.d/.../kernel`, FDT d00dfeed) parsed
+  node-for-node = **hash-only** (kernel@1/fdt@1 each have hash1 crc32 +
+  hash2 sha1; config@1 has **no signature subnode**, no key-name-hint, no
+  rsa algo) → device boots it → U-boot enforces no kernel signature
+  [proven by contradiction]. Bootloader (U-Boot 2023.01-rc2 aarch64, Apr
+  2026) carries generic FIT-sig library strings but **no embedded pubkey**.
+  Recovery unauthenticated: cloud recovery hits `deviceapi.ruijienetworks.com`
+  over **http://** (no https anywhere), takes downloadUrl+sha256 from that
+  reply (`wget_with_dns`); factory recovery TFTP `rgos.bin`@192.168.64.1.
+  New container magic **`upgrade_crypt_boot!@2024`** (raw, not b64) handled
+  only in U-boot (no `BR0kh`, no RSA); its magic is NOT adrp-referenced so
+  the decrypt comparator/key is unresolved. Caveat: MediaTek BROM→BL2
+  efuse secure boot (`bl2_verify`,`mtk_efuse_*` present) can't be seen from
+  firmware, but doesn't matter — kernel stage is hash-only regardless.
+  Ghidra: decrypted u-boot payload imported as raw AARCH64:LE:64:v8A from
+  file off **0x88** (strip Ruijie header), base 0 (PIC, adrp refs
+  self-consistent at any page-aligned base). `tools/` + `xs/uboot430.*`.
+  Remaining = bench/hardware (is efuse SB fused; trace do_mtkupgrade flash
+  gate).
 - **Fourth build, §3.14** (`firmware-audit.md`, added 2026-10-27): the
   2.248 RG-EG305GH-E carries the §3.12 chain unchanged (now with
   `curl -L -k`, i.e. TLS verification off on the download), a by-design

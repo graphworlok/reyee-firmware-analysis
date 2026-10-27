@@ -39,8 +39,9 @@ and drive the cross-build matrix in **§3.15**. On 2026-10-28 the full
 recovery image) and the low-cost **RG-EG105G-V2** stream (2.248 / 2.280 /
 2.300 / 2.340) were added: the EG105G-V2 2.248 reproduces the 2.248 merge
 RCE on a second product line and a second architecture (§3.15), and the
-EG1510XS recovery image introduced a new boot-recovery container tracked
-as an open lead in **§3.16**. The three original images drive §3.1–§3.13
+EG1510XS flagship was found to **boot an unsigned (hash-only) kernel behind
+an unauthenticated HTTP/TFTP recovery fetch**, with a new
+`upgrade_crypt_boot!@2024` container — **§3.16**. The three original images drive §3.1–§3.13
 unless noted. A further bundle, an **RG-WALL 1600-Z-S** NGFW
 (`NGFW_NTOS 1.0R6P1`), is a different OS — not ReyeeOS/OpenWrt, no SON
 stack in the Reyee layout — and is out of scope for this document; it was
@@ -859,52 +860,90 @@ Two consequences worth stating plainly for the vendor and any CNA:
    protected only by the `execvp` sink (§3.15) and not by any acknowledged
    fix. This is the item that most warrants a CVE.
 
-### 3.16 Open lead — a new 2024 boot-recovery container on the flagship, and an unauthenticated recovery fetch
+### 3.16 The flagship boots an unsigned kernel, and its recovery fetch is unauthenticated
 
-*(Added 2026-10-28. This is a lead, not a settled finding; the claims are
-tagged accordingly.)* The RG-EG1510XS flagship stream introduced, at the
-latest build only, a **recovery image in a previously-unseen container
-format**: `EG_3.0(1)B11P430_EG1510XS_…_install_recovery_encrypto.bin`,
-whose magic is `upgrade_crypt_boot!@2024` followed by raw (not base64)
-ciphertext — a third scheme distinct from the `upgrade_crypt_v1` XOR
-(§3.14) and the `upgrade_crypt_v2` OpenSSL (§11) containers. **[proven
-from the header]**
+*(Added 2026-10-28.)* Chasing the new recovery container on the RG-EG1510XS
+flagship led to a more consequential result: **U-boot does not
+cryptographically verify the kernel it boots, and the cloud/TFTP recovery
+paths deliver firmware without authenticating it.** The device's boot and
+recovery trust rests on integrity hashes and plaintext transport, not on
+signatures.
 
-The running rootfs does not handle it: a whole-tree scan of the 2.430.1
-image finds `upgrade_crypt_v2` (in `lib/upgrade/platform.sh` and
-`usr/lib/shell/upgrade_check.sh`) but **no** `upgrade_crypt_boot` /
-`crypt_boot!@2024` string anywhere in the OS. The handler is in **U-boot**
-— which fits a recovery image applied below the OS. The bootloader ships
-`v2`-encrypted (`u-boot-eg1510xs_encrypto_v2`) and decrypts with the same
-FW_KEY, and the plaintext bootloader is the only component carrying
-`crypt_boot!@2024`. **[proven]**
+**The new container.** The flagship's latest build adds a recovery image,
+`EG_3.0(1)B11P430_EG1510XS_…_install_recovery_encrypto.bin`, whose magic is
+`upgrade_crypt_boot!@2024` followed by raw (not base64) ciphertext — a
+third scheme distinct from the `upgrade_crypt_v1` XOR (§3.14) and
+`upgrade_crypt_v2` OpenSSL (§11) containers. The OS rootfs never references
+it (a whole-tree scan of 2.430.1 finds `upgrade_crypt_v2` in
+`lib/upgrade/platform.sh` and `usr/lib/shell/upgrade_check.sh` but **no**
+`upgrade_crypt_boot` anywhere); the only component carrying
+`crypt_boot!@2024` is **U-boot**, which fits a recovery image applied below
+the OS. The bootloader itself ships `v2`-encrypted
+(`u-boot-eg1510xs_encrypto_v2`, decrypts with the same FW_KEY) and is
+**U-Boot 2023.01-rc2, aarch64, built Apr 2026**. The 2024 container is
+keyed differently from the firmware (the plaintext bootloader contains no
+`BR0kh`). **[proven]** *(The exact key/scheme of the 2024 container is not
+resolved — its magic string is not adrp-referenced from code, so it sits in
+a build-info struct and the comparator was not traced.)*
 
-From strings in the decrypted bootloader (no Ghidra trace yet):
+**The kernel FIT is hash-only — no signature.** The shipped, bootable
+kernel (`sysupgrade-EG1510XS/kernel`, a flattened-image-tree, FDT magic
+`d00dfeed`) was parsed node-for-node:
 
-- it contains **no `BR0kh`** — the 2024 recovery container is keyed
-  differently from the firmware key; **[proven]**
-- it has **no `RSA`/`rsa`**, but does carry generic U-boot FIT
-  `signature`/`Hash`/`verify` library strings — whose mere presence does
-  **not** establish that secure boot is enforced; **[proven strings /
-  enforcement not established]**
-- its recovery paths look **integrity-checked but not authenticated**: a
-  *cloud recovery* downloads a firmware bin by `wget` and compares its
-  SHA-256 against a hash **supplied by the server in the same reply**
-  (`download bin sha256sum: %s, not equal to reply sha256sum: %s`), and a
-  *factory recovery* fetches `rgos.bin` over **TFTP** from `192.168.64.1`
-  (`[SYSTEM-RECOVERY] … tftpboot %s:%s`). A server-supplied hash over
-  `wget`, and TFTP, are integrity-against-corruption, **not** authenticity
-  against a MITM. **[inferred from strings — the control-flow that gates
-  an actual flash on these checks is not yet traced]**
+```
+/ images / kernel@1 → hash1 (crc32), hash2 (sha1)
+/ images / fdt@1    → hash1 (crc32), hash2 (sha1)
+/ configurations / config@1   — no signature subnode
+```
 
-**What is not yet established, and must be before any claim:** whether the
-normal kernel boot enforces a FIT signature (secure boot); whether either
-recovery path authenticates the image beyond the server-provided hash; and
-the exact key/scheme of `upgrade_crypt_boot!@2024`. These need a Ghidra
-trace of the bootloader's `system_recovery` / `cloud_recovery` / FIT-verify
-functions. Flagged here because an unauthenticated recovery-flash path on
-the top-of-range device is exactly the kind of bootstrap-trust gap worth
-running down.
+There is **no `signature` node, no `key-name-hint`, no `rsa`/`ecdsa`
+`algo`** — only CRC32 and SHA1 integrity hashes, both trivially
+recomputable by anyone who alters the image. A U-boot built with FIT
+signature enforcement (`CONFIG_FIT_SIGNATURE` + a `required` key) refuses
+to boot a config with no signature; this device boots this image, so
+**U-boot is not enforcing kernel signatures.** The bootloader carries the
+generic FIT `signature`/`key-name-hint`/`required`/`Verifying Hash
+Integrity` library strings, but there is **no embedded public key** for
+them to use — they are compiled-in library code, not an active root of
+trust. **[proven — by the shipped FIT plus the boot-succeeds contradiction]**
+
+**The recovery fetch is unauthenticated.** Two recovery paths in the
+bootloader:
+
+- **Cloud recovery** queries `deviceapi.ruijienetworks.com` over **plaintext
+  `http://`** (no `https://` URL appears anywhere in the bootloader), via
+  `wget_with_dns`, and takes both the firmware `downloadUrl` **and** the
+  expected `sha256` from that HTTP response
+  (`download bin sha256sum: %s, not equal to reply sha256sum: %s`). A hash
+  delivered over the same unauthenticated channel as the image it
+  "verifies" provides integrity against corruption, not authenticity: an
+  on-path attacker (DNS spoof, rogue gateway, transit MITM) who answers the
+  HTTP request supplies both the image and its expected hash. **[proven
+  from strings]**
+- **Factory recovery** fetches `rgos.bin` over **TFTP** from `192.168.64.1`
+  (`[SYSTEM-RECOVERY] … tftpboot %s:%s`) — unauthenticated by construction.
+  **[proven from strings]**
+
+**Net.** Because the kernel FIT carries no signature and U-boot enforces
+none, an image delivered by either recovery path — or any write to the
+boot partition — boots as long as its CRC32/SHA1 hashes are valid, which an
+attacker controlling the image computes freely. The server-supplied SHA-256
+in cloud recovery adds nothing against tampering. So the flagship's
+boot/update trust is **transport + integrity hash, with no image
+authenticity** at the U-boot layer.
+
+**The one thing firmware cannot show, stated plainly.** MediaTek SoCs can
+enforce a BROM→BL2 secure-boot chain using **efuse**-burned keys that
+verify BL2/U-boot before the kernel stage — the bootloader does carry
+`bl2_verify` and `mtk_efuse_read/write`. Whether that chain is *provisioned
+and fused* on shipping units cannot be determined from a firmware image
+(the keys live in ROM/efuse, not the image). But note it would not change
+this finding: even a hardware-verified BL2/U-boot hands off to a kernel it
+verifies **only by hash** here, so the kernel/rootfs an attacker substitutes
+still boots. Confirming whether efuse secure boot is even enabled, and
+tracing the `do_mtkupgrade` / `cloud_recovery` flash gate end-to-end, would
+require hardware — the natural place this moves from static analysis to a
+bench.
 
 ## 4. Recommendations
 

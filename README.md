@@ -55,11 +55,16 @@ cross-build matrix in `firmware-audit.md` §3.15. Headlines:
   all EG1510XS/EG105GW) runs the merge through an `execvp`-style wrapper,
   which is the control that actually blocks the in-the-wild payload. The
   low-cost EG105G-V2 ≤2.248 is a practical hardware-verification target;
-- an **open lead** (`firmware-audit.md` §3.16): the EG1510XS flagship's
-  latest recovery image uses a new `upgrade_crypt_boot!@2024` container
-  handled only in U-boot, whose recovery-fetch paths (server-supplied
-  SHA-256 over `wget`; TFTP `rgos.bin`) look integrity-checked but not
-  authenticated — not yet traced, flagged for follow-up.
+- the **flagship boots an unsigned kernel** (`firmware-audit.md` §3.16):
+  the RG-EG1510XS kernel FIT is **hash-only** (crc32 + sha1, no signature
+  node, no key), so U-boot enforces no kernel signature; its recovery
+  fetch is **unauthenticated** (cloud recovery pulls both the firmware URL
+  and its "expected" SHA-256 from `deviceapi.ruijienetworks.com` over
+  plaintext HTTP; factory recovery is TFTP). Boot/update trust is transport
+  + integrity hash, not image authenticity — at the U-boot layer. A
+  BROM/efuse hardware secure-boot chain can't be ruled out from firmware,
+  but it wouldn't help: the kernel stage is verified only by hash. A new
+  `upgrade_crypt_boot!@2024` recovery container appears here too.
 
 An RG-WALL NGFW bundle (different OS) is noted but out of scope.
 
