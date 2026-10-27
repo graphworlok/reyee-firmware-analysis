@@ -1,7 +1,12 @@
 # Handoff — ReyeeOS / Easydisc
 
 Session-continuity doc. **Read this first** in a fresh session to pick
-up this work without re-deriving it. Last updated 2026-09-20
+up this work without re-deriving it. Last updated 2026-10-27 (a fourth
+image — ReyeeOS 2.248, RG-EG305GH-E — audited as §3.14; then **seven
+more vendor bundles** decrypted and compared — RG-EG305GH-E 2.388/2.410/
+2.430, a third product line RG-EG210G-P-V3 2.388/2.410/2.430, and an
+out-of-scope RG-WALL NGFW — written up as the cross-build matrix
+`firmware-audit.md` §3.15). Prior update 2026-09-20
 (MIPS validator scope and message-type mapping resolved; several §4
 method traps corrected — two of them were themselves wrong).
 
@@ -22,6 +27,19 @@ split out of.
 | `binaries\` | `easyson.elf` (2.430 aarch64), `easyson_2380.elf`, `easyson_2388.elf` (MIPS32 LE), `enet_disp.elf`, `liblib_c.so`, `liblib_c_2380.so`, `liblib_c_2388.so`, `libeasyson_utils.so`, `sd_crypto`, `libsd_crypto.so`, `sd-upgrade-crypto` |
 | `fw\` | the 2.430 image + `sysup\` |
 | `fw2380\`, `fw2388\` | `decrypted.*` and `rootfs.squashfs` |
+| `fw248\` | 2.248 `rootfs.squashfs`, `kernel`, `CONTROL` (RG-EG305GH-E) |
+| `binaries\` (2.248) | `mqtt_248.elf`, `easydisc_248.elf`, `liblib_c_248.so` |
+
+The 2.248 image itself ships in the repo-tracked firmware folder
+`Ruijie RG-EG305GH-E Series Routers ReyeeOS 2.248 Firmware/` as the
+encrypted `…sysupgrade_encrypto_v1.tar.bin`. That container is **not**
+OpenSSL-encrypted like the §11 images: strip the 22-byte
+`upgrade_crypt_v1!@2021` header, XOR the remainder with `0x7f`, fix the
+first 6 bytes back to `sysupg` (the header overwrote the tar name), and
+it is a plain tar of `CONTROL` / `kernel` / `root` (squashfs). The
+rootfs squashfs is LZMA and unpacks with `unsquashfs` or
+`PySquashfsImage`. Scratch extraction this session was under the
+session scratchpad, mirrored into `reyee-firmware\fw248\`.
 
 **Unpacked rootfs trees, on `telly`** (Linux host, `telly@192.168.242.153`):
 
@@ -42,6 +60,19 @@ they are gone. Decryption procedure is in `easydisc-protocol.md` §11.
 | `easyson.elf` | aarch64, 1,479 functions, base `0x400000`. **String xrefs resolve** — this is the build to work in. |
 | `easyson_2380.elf`, `easyson_2388.elf` | MIPS32 LE, 769 functions each, 549 of them **named** from an intact `.dynsym`. Analysed, and `decompile_function` works. Ghidra instruction *search* is broken on them — see §4. |
 | `liblib_c.so`, `libeasyson_utils.so`, `sd_crypto`, `libsd_crypto.so`, `sd-upgrade-crypto` | imported |
+| `mqtt_248.elf`, `easydisc_248.elf` (2.248, aarch64) | imported. **Ghidra string search and auto-analysis both misbehave on these** — see §4. Functions were created by hand and `reanalyze` run once; after that `decompile_function` works. |
+
+**2.248 Ghidra note.** On these two fresh imports `search_strings`
+returns nothing, `get_xrefs_to` finds no refs to string addresses, and
+the first `run_analysis` reported 7 ms / 0 new functions. The route
+that worked: map string file-offset → VA with the program headers,
+decode `adrp`+`add` pairs out of `.text` to find the referencing
+instruction (same technique as §4/§11 for 2.430), find the enclosing
+`stp x29,x30,[sp,#-N]!` prologue, `create_function` there, then a single
+`reanalyze`. PLT stubs resolve to import names by decoding the
+`adrp`/`ldr` in each stub and matching the GOT target against `.rela.plt`
+(`r_info>>32` → `.dynsym`). Scripts used this session are in the
+scratchpad `tools\` (`off2va.py`, `adrp.py`, `strs.py`).
 
 ## 2. What is settled
 
@@ -57,6 +88,38 @@ Do not re-derive these:
   versions, the ACL granting `#`, the shell-exec-vs-validation ratio,
   and **§3.12** — the remote root command-injection plus
   unverified-firmware-install chain over the MQTT upgrade topic.
+- **Cross-build matrix, §3.15** (`firmware-audit.md`, added 2026-10-27):
+  seven more bundles in `Firmware_Bundles/` (zip→gzip→tar→`encrypto_v2`
+  container; decrypt with `scratchpad/tools/fwdec.py` — OpenSSL
+  `EVP_BytesToKey(MD5,salt,FW_KEY,iter=2023)`+AES-256-CBC). Shared keys/
+  hash/ACL/cloud-creds/salt are **byte-identical across EG1510XS,
+  EG105GW, EG305GH and the new third line EG210G-P-V3, up to current
+  2.430 firmware**. Two barriers protect the geico path: (1)
+  `param_safety_check` on the esw hello path, (2) merge sink =
+  `son_utils_safe_exec`/`execvp` vs `system()`. **2.248 EG305GH is the
+  only build with neither** (system() sink + no validator + open
+  broker); EG210G 2.430 MIPS has barrier 1 absent but barrier 2 present
+  (traced: `esw_disc_handle_hello_msg@0x423434`, merge builder
+  `FUN_0042214c`→`son_utils_safe_exec`). EG210G `install_encrypto_v2.bin`
+  is a raw install image — carve the `hsqs` squashfs, don't expect a
+  sysupgrade tar. RG-WALL NGFW = different OS (NTOS `INSTALL!`), not
+  analysed. Unpacked rootfs trees + staged binary
+  `binaries/easyson_eg210g_2430.elf` live under the session scratchpad
+  `bundles/`.
+- **Fourth build, §3.14** (`firmware-audit.md`, added 2026-10-27): the
+  2.248 RG-EG305GH-E carries the §3.12 chain unchanged (now with
+  `curl -L -k`, i.e. TLS verification off on the download), a by-design
+  remote-shell topic (`rpc/shell/request` / `shreq` → `system`/`popen`),
+  a **plaintext `admin`** auto-merge password via a bare `system()` in
+  `easydisc.elf` (no validator — the daemon does not link `liblib_c.so`),
+  and a broker whose entire config is 38 bytes with no listener / no
+  `password_file` / no ACL / no TLS → anonymous on `0.0.0.0:1883`. Root
+  hash, dropbear and cloud creds identical to §3.5/§3.6; a second
+  `admin` shadow entry is new. Key addresses: upgrade parser
+  `mqtt_248.elf FUN_004267d4`, download+inject `FUN_004264e4`, sysupgrade
+  `FUN_00426454`, upgrade subscribe `FUN_00426ddc`, shell exec
+  `FUN_0042a90c`, popen wrapper `FUN_00422ce8`, mosq client
+  `FUN_0041adf8`; auto-merge sink `easydisc_248.elf FUN_0040f174`.
 
 ### Function map (aarch64 `easyson.elf`, 2.430)
 

@@ -394,6 +394,75 @@ because the payload's precision — the salt, the `0x150` alignment, the
 32-character fit, the `reserve1` padding — is very hard to explain
 unless it was developed against a build where it *did* work.
 
+**And a fourth image makes that build concrete.** *(Added 2026-10-27.)*
+The RG-EG305GH-E at ReyeeOS 2.248 (`firmware-audit.md` §3.14) is a build
+on which **both** barriers above are absent and every property geico's
+payload is fitted to is present. Traced statically in `easydisc.elf`
+(aarch64) of that image:
+
+- **The salt is byte-identical** — `03251584460325158446032515844600`,
+  embedded at `easydisc.elf:0x422110` — so geico's MD5 prefix (§3)
+  validates here exactly as it does on the others. **[proven]**
+- **The §7 blocklist barrier does not exist on this build at all.**
+  `param_safety_check` lives in `liblib_c.so`; the 2.248 discovery daemon
+  is a separate binary that links `libeasydisc.so` and **not**
+  `liblib_c.so`, and neither `param_safety_check` nor
+  `utils_param_safe_check` appears anywhere in it. The leading `'` that
+  gets geico's packet dropped on 2.430 hits nothing here. **[proven]**
+- **The `reserve1 == "l3"` gate is present and is a literal compare.**
+  The merge-decision function `FUN_0040f548` gates the auto-merge on the
+  device mode (`cmp #4` / `cmp #5` on the role global at `0x434fc8`), on
+  the message `networkId` differing from the device's own
+  (`strncmp` against `"0"` at `0x421140` and against self-networkId),
+  and on `strncmp(reserve1, "l3", …)` — the literal `"l3"` at
+  `0x421168`, read from `msg.discInfo.reserve1` and logged as
+  `msg.discInfo.reserve1: %s`. If the resulting flag is set it logs
+  `Auto merge ESW[%s] to %s` and calls the merge sink. **[proven]**
+- **The §8 second barrier is gone too: the sink is `system()`, not
+  `execvp`.** The merge sink `FUN_0040f174` is
+  `snprintf(buf, 0x100, "dev_sta set -m esw_networkId_merge '{\"password\":\"admin\", \"type\":\"noenc\",\"force\":\"true\",\"fromSn\":[\"%s\"],\"fromNetworkId\":\"%s\",\"toNetworkId\":\"%s\"}' -b 1", …)` followed by a bare **`system(buf)`** (PLT-resolved). The three `%s`
+  sit inside single quotes; `fromSn` and `fromNetworkId` are taken from
+  the received message struct (`fromNetworkId` is the very field the
+  `differs-from-own` check reads), `toNetworkId` is the device's own.
+  So a `'` in the message `networkId` — geico's `0x150` field — closes
+  the quote in a command run as root. The merge password is the literal
+  `admin` (`type:noenc`), not the `U2FsdGVkX18…` blob of §9. **[proven]**
+
+**What is proven and what is not.** Proven: the salt, the absence of any
+validator on this daemon's discovery path, the `"l3"` literal gate, and
+that the sink is `system()` with message-derived fields inside single
+quotes. **Not traced to the byte:** that the wire-offset `0x150`
+`networkId` lands specifically in the struct slot used as
+`fromNetworkId` (inferred from the `differs-from-own-networkId` compare
+on that slot, strong but not followed through the recv/parse `memcpy`),
+the full set of merge preconditions (mode, the two global flags and the
+per-neighbour counter of §8 — mode and `reserve1` are confirmed, the
+rest not enumerated on this build), and the `snprintf(…, 0x100, …)`
+truncation margin (geico's `networkId` command is ≤32 chars, so it fits,
+but this was reasoned not fuzzed). **No device was tested.** The honest
+statement is that 2.248 is a shipping build on which geico's datagram is
+**not** stopped by either barrier that stops it on 2.430, and on which
+its `reserve1`/`networkId` layout lines up with a root `system()` — i.e.
+this is the kind of build the payload was developed against, established
+statically and short of execution.
+
+**And the second barrier, left open above, is now observed on a MIPS
+build.** *(Added 2026-10-27.)* A third product line — RG-EG210G-P-V3,
+MIPS, at 2.388/2.410/2.430 — was added to the set (`firmware-audit.md`
+§3.15). On its 2.430 build the esw hello path has **no**
+`param_safety_check` (confirmed in Ghidra: `esw_disc_handle_hello_msg`
+validates only with `son_check_ipv4`/`strcmp`/`strncmp`/`strlen`, and a
+GOT scan puts every validator site off the discovery path, exactly as on
+EG105GW) — so barrier one is absent, as on all MIPS builds. **But its
+merge builder calls `son_utils_safe_exec`** (argv/`execvp`), not
+`system()`, so barrier two *is* present and geico's quote-breakout has no
+shell to land in. This settles the question §8 left open for the MIPS
+line in the direction of "not exploitable at the sink": across every
+image examined, the **only** build whose merge sink is `system()` is
+2.248 EG305GH. The metacharacter blocklist is not the load-bearing
+control; the `execvp`-style sink is, and 2.248 is the build that dropped
+it. Full matrix in `firmware-audit.md` §3.15.
+
 ## 9. Hardcoded credentials in the merge path
 
 `FUN_004147fc` (`esw_disc.c:0x4f`) builds the auto-merge request and
