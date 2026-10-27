@@ -1,12 +1,18 @@
 # Handoff — ReyeeOS / Easydisc
 
 Session-continuity doc. **Read this first** in a fresh session to pick
-up this work without re-deriving it. Last updated 2026-10-27 (a fourth
-image — ReyeeOS 2.248, RG-EG305GH-E — audited as §3.14; then **seven
-more vendor bundles** decrypted and compared — RG-EG305GH-E 2.388/2.410/
-2.430, a third product line RG-EG210G-P-V3 2.388/2.410/2.430, and an
+up this work without re-deriving it. Last updated 2026-10-28: the full
+**RG-EG1510XS** flagship stream (2.410, latest 2.430.1, + a 2.430.0
+recovery image) and the low-cost **RG-EG105G-V2** stream (2.248/2.280/
+2.300/2.340) decrypted and compared — EG105G-V2 2.248 reproduces the
+2.248 `system()`-sink merge RCE on MIPS (sink now **proven**,
+`FUN_00417da8`), and the EG1510XS recovery image introduced a new
+`upgrade_crypt_boot!@2024` U-boot container tracked as open lead §3.16.
+Earlier on 2026-10-27: the fourth image (ReyeeOS 2.248, RG-EG305GH-E,
+§3.14) and **seven more vendor bundles** — RG-EG305GH-E 2.388/2.410/2.430,
+a third product line RG-EG210G-P-V3 2.388/2.410/2.430, and an
 out-of-scope RG-WALL NGFW — written up as the cross-build matrix
-`firmware-audit.md` §3.15). Prior update 2026-09-20
+`firmware-audit.md` §3.15. Prior update 2026-09-20
 (MIPS validator scope and message-type mapping resolved; several §4
 method traps corrected — two of them were themselves wrong).
 
@@ -96,9 +102,10 @@ Do not re-derive these:
   EG105GW, EG305GH and the new third line EG210G-P-V3, up to current
   2.430 firmware**. Two barriers protect the geico path: (1)
   `param_safety_check` on the esw hello path, (2) merge sink =
-  `son_utils_safe_exec`/`execvp` vs `system()`. **2.248 EG305GH is the
-  only build with neither** (system() sink + no validator + open
-  broker); EG210G 2.430 MIPS has barrier 1 absent but barrier 2 present
+  `son_utils_safe_exec`/`execvp` vs `system()`. **Both barriers are down
+  only on the 2.248 split-daemon builds** (system() sink + no validator +
+  open broker) — EG305GH 2.248 and, added 2026-10-28, EG105G-V2 2.248 (see
+  next bullet); EG210G 2.430 MIPS has barrier 1 absent but barrier 2 present
   (traced: `esw_disc_handle_hello_msg@0x423434`, merge builder
   `FUN_0042214c`→`son_utils_safe_exec`). EG210G `install_encrypto_v2.bin`
   is a raw install image — carve the `hsqs` squashfs, don't expect a
@@ -106,6 +113,25 @@ Do not re-derive these:
   analysed. Unpacked rootfs trees + staged binary
   `binaries/easyson_eg210g_2430.elf` live under the session scratchpad
   `bundles/`.
+- **EG1510XS + EG105G-V2 streams, §3.15/§3.16** (added 2026-10-28):
+  scratchpad `eg105/` (EG105G-V2 2.248/2.280/2.300/2.340, MIPS) and `xs/`
+  (EG1510XS 2.410/2.430.1 + 2.430.0 recovery, aarch64). EG105G-V2 2.248
+  reproduces the 2.248 split-daemon `system()`-sink RCE on **MIPS** — the
+  sink is now **proven**: `easydisc.elf` (md5 `30771304…`) merge builder
+  **`FUN_00417da8`** = `snprintf(buf,0x100,<tmpl@0x436830>,a,b,c)` →
+  `system(buf)` (`PTR_system_0044a008`); same template as EG305GH 2.248
+  `FUN_0040f174`. The EG105G-V2 fix lands at **2.280** (unified
+  `easyson.elf`, both barriers back). So "2.248" = a posture across ≥2
+  product lines, not one image; EG105G-V2 is the low-cost hardware-verify
+  target. 2.248/2.280/2.300 are **`encrypto_v1`** (XOR, `tools/xor.py` +
+  fix first 6 bytes to `sysupg`, then carve `hsqs`); 2.340 + EG1510XS are
+  v2. **§3.16 open lead:** EG1510XS latest ships a `..._install_recovery_
+  encrypto.bin` with new magic **`upgrade_crypt_boot!@2024`** (raw, not
+  base64), handled **only in U-boot** (decrypt `u-boot-eg1510xs_encrypto_v2`
+  with fwdec → plaintext has `crypt_boot!@2024`, no `BR0kh`, no RSA, but
+  `system_recovery`/`cloud_recovery` with server-supplied-sha256-over-wget
+  and TFTP `rgos.bin` from 192.168.64.1). NOT traced — whether secure boot
+  / recovery auth is enforced is the next Ghidra job.
 - **Fourth build, §3.14** (`firmware-audit.md`, added 2026-10-27): the
   2.248 RG-EG305GH-E carries the §3.12 chain unchanged (now with
   `curl -L -k`, i.e. TLS verification off on the download), a by-design

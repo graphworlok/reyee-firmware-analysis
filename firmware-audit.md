@@ -22,26 +22,34 @@ used.
 
 | build | product | arch | easydisc pkg |
 |---|---|---|---|
-| **ReyeeOS 2.430.0.1924** (`EG_3.0(1)B11P430`, `mediatek/eg1510xs`) | RG-EG1510XS | `aarch64_cortex-a53` | 4.0-0 |
+| **ReyeeOS 2.430.0.1924 / 2.410 / 2.430.1.2128** (`EG_3.0(1)B11P{430,410}`, `mediatek/eg1510xs`) | RG-EG1510XS (flagship) | `aarch64_cortex-a53` | merged `easyson.elf` |
 | **ReyeeOS 2.388** | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) | 4.0-0 |
 | **ReyeeOS 2.380** | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) | 4.0-0 |
 | **ReyeeOS 2.248.0.2216** (`EG_3.0(1)B11P248`, `mediatek/eg305gh-e`) | RG-EG305GH-P-E | `aarch64_cortex-a53` | split `mqtt.elf` + `easydisc.elf` |
 | **ReyeeOS 2.388 / 2.410 / 2.430** (`EG_3.0(1)B11P{388,410,430}`, `mediatek/eg305gh-e`) | RG-EG305GH-P-E | `aarch64_cortex-a53` | merged `easyson.elf` |
 | **ReyeeOS 2.388 / 2.410 / 2.430** (`EG_3.0(1)B11P{388,410,430}`, `ramips/generic`) | RG-EG210G-P-V3 | `ramips_24kec` (MIPS32 LE) | merged `easyson.elf` |
+| **ReyeeOS 2.248.0.2212** (`EG_3.0(1)B11P248`) | RG-EG105G-V2 / -P-V2 (low-cost) | `ramips_24kec` (MIPS32 LE) | split `mqtt.elf` + `easydisc.elf` |
+| **ReyeeOS 2.280 / 2.300 / 2.340** (`EG_3.0(1)B11P{280,300,340}`) | RG-EG105G-V2 / -P-V2 | `ramips_24kec` (MIPS32 LE) | merged `easyson.elf` |
 
-The fourth image (2.248) was added 2026-10-27 and is written up in
-§3.14; six further images (RG-EG305GH-E and a third product line,
-**RG-EG210G-P-V3**, each at 2.388 / 2.410 / 2.430) were added the same
-day and drive the cross-build matrix in **§3.15**. The three original
-images drive §3.1–§3.13 unless noted. A seventh new bundle, an
-**RG-WALL 1600-Z-S** NGFW (`NGFW_NTOS 1.0R6P1`), is a different OS — not
-ReyeeOS/OpenWrt, no SON stack in the Reyee layout — and is out of scope
-for this document; it was decrypted to an `INSTALL!` image and not
-further analysed here.
+The fourth image (2.248 EG305GH) was added 2026-10-27 and is written up
+in §3.14; six further images (RG-EG305GH-E and a third product line,
+**RG-EG210G-P-V3**, each at 2.388 / 2.410 / 2.430) were added the same day
+and drive the cross-build matrix in **§3.15**. On 2026-10-28 the full
+**RG-EG1510XS** flagship stream (2.410, latest 2.430.1, and a 2.430.0
+recovery image) and the low-cost **RG-EG105G-V2** stream (2.248 / 2.280 /
+2.300 / 2.340) were added: the EG105G-V2 2.248 reproduces the 2.248 merge
+RCE on a second product line and a second architecture (§3.15), and the
+EG1510XS recovery image introduced a new boot-recovery container tracked
+as an open lead in **§3.16**. The three original images drive §3.1–§3.13
+unless noted. A further bundle, an **RG-WALL 1600-Z-S** NGFW
+(`NGFW_NTOS 1.0R6P1`), is a different OS — not ReyeeOS/OpenWrt, no SON
+stack in the Reyee layout — and is out of scope for this document; it was
+decrypted to an `INSTALL!` image and not further analysed here.
 
 Method: static analysis of the unpacked rootfs and of `easyson.elf`
-(aarch64, 2.430) — and, for 2.248, of `mqtt.elf` and `easydisc.elf` — in
-Ghidra, plus config and key-material inspection across all four trees. Vendor source filenames and line numbers quoted
+(aarch64, 2.430) — and, for the 2.248 split-daemon builds, of `mqtt.elf`
+and `easydisc.elf` — in Ghidra, plus config and key-material inspection
+across all trees. Vendor source filenames and line numbers quoted
 below are the vendor's own, recovered from `dbg_printf` arguments
 (`core/mosq_thd.c`, `interface/ubus.c`, `enet_network/enet_network.c`).
 
@@ -695,19 +703,22 @@ yet that this is a platform-wide design, not a per-model regression.
 
 ### 3.15 Cross-build matrix — three product lines, and which barrier actually protects the device
 
-*(Added 2026-10-27.)* Seven further ReyeeOS router images were obtained
-as vendor upgrade bundles (`.zip` → gzip → tar of metadata + an
+*(Added 2026-10-27; extended 2026-10-28 with the RG-EG1510XS and
+RG-EG105G-V2 streams.)* Fourteen further ReyeeOS router images were
+obtained as vendor upgrade bundles (`.zip` → gzip → tar of metadata + an
 `encrypto_v1`/`v2` container; decryption per `easydisc-protocol.md` §11
-for v2, the `upgrade_crypt_v1` XOR scheme of §3.14 for v1). They add a
-**third product line** (RG-EG210G-P-V3, MIPS) and three later versions
-of the RG-EG305GH-E, so the shared-secret and discovery-path findings can
-now be read against product, architecture **and** version separately
-rather than all varying together (the caveat that bounded §3.13/§8).
+for v2, the `upgrade_crypt_v1` XOR scheme of §3.14 for v1). They add two
+more product lines — **RG-EG210G-P-V3** (MIPS) and the low-cost
+**RG-EG105G-V2** (MIPS) — plus the full **RG-EG1510XS** flagship stream
+(2.410 and the latest 2.430.1, released ~mid-October 2026), so the
+shared-secret and discovery-path findings can now be read against product,
+architecture **and** version separately rather than all varying together
+(the caveat that bounded §3.13/§8). Five router product lines in all.
 
 **What is byte-identical everywhere.** Across every router image examined
-— RG-EG1510XS, RG-EG105GW(T), RG-EG305GH-E and RG-EG210G-P-V3, spanning
-aarch64 and MIPS and ReyeeOS 2.248 through 2.430 — the following are the
-same bytes: **[proven]**
+— RG-EG1510XS, RG-EG105GW(T), RG-EG305GH-E, RG-EG210G-P-V3 and
+RG-EG105G-V2, spanning aarch64 and MIPS and ReyeeOS 2.248 through the
+latest 2.430.1 — the following are the same bytes: **[proven]**
 
 - the root hash `root:$1$zOItWvpX$tKgP2GnQDoUZn16hVplYv1` (§3.5);
 - the broker private keys `server.key` md5 `5b60f5bf…` (2048-bit) and
@@ -721,9 +732,13 @@ same bytes: **[proven]**
   (`easydisc-protocol.md` §3).
 
 So §3.1, §3.4, §3.5 and §3.6 are not artefacts of three images — they
-hold on a third product line and on **current (2.430) firmware built in
-September 2026**. This is the central point: the shared-secret exposure
-is platform-wide and still shipping.
+hold on five product lines and on the **latest flagship firmware
+(RG-EG1510XS 2.430.1.2128), released ~two weeks before this was written**.
+This is the central point: the shared-secret exposure is platform-wide
+and still shipping in the newest build of the top-of-range device. The
+EG105G-V2 adds the same root hash, the same `admin:$1$zzg8tSF4$…` entry
+(§3.14) and the same broker keys, extending the exposure to the
+lowest-cost device in the range.
 
 **Where the builds differ: the two barriers on the discovery → merge
 path.** geico's packet (`easydisc-protocol.md` §8) is stopped on 2.430
@@ -735,11 +750,32 @@ across the builds: **[proven except where noted]**
 
 | build | product / arch | daemon | barrier 1: `param_safety_check` on esw hello path | barrier 2: merge sink | broker |
 |---|---|---|---|---|---|
-| 2.430 | EG1510XS aarch64 | `easyson.elf` | **present** (§3.13) | `son_utils_safe_exec` / `execvp` (§9) | shared-key TLS (§3.1) |
+| **2.248** | EG305GH aarch64 | split `easydisc.elf` + `mqtt.elf` | **absent** (daemon doesn't link `liblib_c.so`) | **`system()` / shell** (§3.14, `FUN_0040f174`) | **open / anonymous** (§3.14) |
+| **2.248** | **EG105G-V2 MIPS** | split `easydisc.elf` + `mqtt.elf` | **absent** | **`system()` / shell** — proven, `FUN_00417da8`→`system` | **open / anonymous** (`max_connections 33`, no listener) |
+| 2.280 / 2.300 / 2.340 | EG105G-V2 MIPS | `easyson.elf` | **present** | `son_utils_safe_exec` / `execvp` | shared-key TLS |
 | 2.380 / 2.388 | EG105GW MIPS | `easyson.elf` | **absent** (§3.13) | not settled in §8 | shared-key TLS |
-| **2.248** | EG305GH aarch64 | split `easydisc.elf` | **absent** (daemon doesn't link `liblib_c.so`) | **`system()` / shell** (§3.14) | **open / anonymous** (§3.14) |
 | 2.388 / 2.410 / 2.430 | EG305GH aarch64 | `easyson.elf` | imported; call-on-path not re-traced | `son_utils_safe_exec` (import + `type:enc` `%s` template) | shared-key TLS |
 | 2.388 / 2.410 / 2.430 | EG210G MIPS | `easyson.elf` | **absent** (confirmed 2.430) | **`son_utils_safe_exec` / `execvp`** (confirmed 2.430) | shared-key TLS |
+| 2.410 / 2.430.1 | EG1510XS aarch64 | `easyson.elf` | **present** | `son_utils_safe_exec` / `execvp` | shared-key TLS |
+| 2.430.0 | EG1510XS aarch64 | `easyson.elf` | **present** (§3.13) | `son_utils_safe_exec` / `execvp` (§9) | shared-key TLS (§3.1) |
+
+**Two product lines ship the vulnerable 2.248 posture, and the EG105G-V2
+sink is proven on MIPS.** The split-daemon, no-validator, `system()`-sink,
+open-broker design of §3.14 is not unique to the EG305GH: the low-cost
+**RG-EG105G-V2** at ReyeeOS 2.248.0.2212 carries the byte-for-byte same
+architecture. Its `easydisc.elf` merge builder decompiles to
+`snprintf(buf, 0x100, "dev_sta set -m esw_networkId_merge '{\"password\":\"admin\", \"type\":\"noenc\",\"force\":\"true\",\"fromSn\":[\"%s\"],\"fromNetworkId\":\"%s\",\"toNetworkId\":\"%s\"…", a, b, c)` followed by a bare
+`system(buf)` (`FUN_00417da8`, sink `PTR_system_0044a008`) — the same
+three packet-derived `%s` inside single quotes, into `system()`, with no
+`execvp` or `son_utils_safe_exec` present and no `param_safety_check` in
+the daemon. This is the identical construction traced on EG305GH 2.248
+(`FUN_0040f174`), now confirmed on a second product line and a second
+architecture. **[proven]** On EG105G-V2 the fix lands at **2.280**: 2.280,
+2.300 and 2.340 all revert to the unified `easyson.elf` with both barriers
+restored. So "2.248" names a *posture* — the both-barriers-down
+split-daemon era — shared by at least two product lines, not a single
+anomalous image; and the EG105G-V2 is a low-cost, readily-obtainable
+device on which that posture can be verified against hardware.
 
 The EG210G 2.430 row was traced in Ghidra: `esw_disc_handle_hello_msg`
 (`0x423434`) copies the 460-byte header and validates only with
@@ -752,20 +788,22 @@ esw_networkId_merge` argv and calls **`son_utils_safe_exec`**, not
 `system()`. So on EG210G the first barrier is absent and the second is
 present. **[proven]**
 
-**The conclusion that matters.** Of every build examined, **2.248
-EG305GH is the only one where the merge sink is `system()` and there is
-no validator** — i.e. the only one where both barriers are down. On the
-MIPS builds the blocklist is absent too, but the merge runs through
-`execvp`, so geico's `'…|sh'` has no shell to break into and is inert at
-the sink. The load-bearing protection across the fleet is therefore **the
-`execvp`-style sink, not the metacharacter blocklist** — and 2.248 is
-precisely the build that replaced it with `system()`. That both sharpens
-§3.14 (2.248 is not merely "worse", it is uniquely exploitable on this
-axis among the images in hand) and answers the §8 question of what build
-geico was developed against: one shaped like 2.248. The vendor should
-read the `system()` merge sink and the open broker of 2.248 as the
-regression to explain, and the shared secrets of §3.15 as the
-platform-wide exposure that outlives any single build.
+**The conclusion that matters.** Both builds with the sink at `system()`
+and no validator — i.e. both barriers down — are **2.248 split-daemon
+builds**: EG305GH 2.248 (aarch64) and EG105G-V2 2.248 (MIPS). Every build
+that runs the unified `easyson.elf` (every ≥2.280 EG105G-V2, every ≥2.388
+EG305GH/EG210G, and all EG1510XS/EG105GW images) routes the merge through
+`son_utils_safe_exec`/`execvp`, so geico's `'…|sh'` has no shell to break
+into and is inert at the sink — even on the MIPS builds where the
+blocklist is also absent. The load-bearing protection across the fleet is
+therefore **the `execvp`-style sink, not the metacharacter blocklist**,
+and the 2.248 era is precisely when the sink was `system()`. That sharpens
+§3.14 (2.248 is a *posture*, reproduced on at least two product lines and
+two architectures, not one anomalous image) and answers the §8 question of
+what build geico was developed against: one shaped like 2.248. The vendor
+should read the `system()` merge sink and the open broker of the 2.248
+split-daemon builds as the regression to explain, and the shared secrets
+of §3.15 as the platform-wide exposure that outlives any single build.
 
 *(Method note: the v2 images decrypt with `EVP_BytesToKey(MD5, salt,
 FW_KEY, iter=2023)` + AES-256-CBC after stripping the
@@ -820,6 +858,53 @@ Two consequences worth stating plainly for the vendor and any CNA:
    merely architectural convergence, current firmware of other builds is
    protected only by the `execvp` sink (§3.15) and not by any acknowledged
    fix. This is the item that most warrants a CVE.
+
+### 3.16 Open lead — a new 2024 boot-recovery container on the flagship, and an unauthenticated recovery fetch
+
+*(Added 2026-10-28. This is a lead, not a settled finding; the claims are
+tagged accordingly.)* The RG-EG1510XS flagship stream introduced, at the
+latest build only, a **recovery image in a previously-unseen container
+format**: `EG_3.0(1)B11P430_EG1510XS_…_install_recovery_encrypto.bin`,
+whose magic is `upgrade_crypt_boot!@2024` followed by raw (not base64)
+ciphertext — a third scheme distinct from the `upgrade_crypt_v1` XOR
+(§3.14) and the `upgrade_crypt_v2` OpenSSL (§11) containers. **[proven
+from the header]**
+
+The running rootfs does not handle it: a whole-tree scan of the 2.430.1
+image finds `upgrade_crypt_v2` (in `lib/upgrade/platform.sh` and
+`usr/lib/shell/upgrade_check.sh`) but **no** `upgrade_crypt_boot` /
+`crypt_boot!@2024` string anywhere in the OS. The handler is in **U-boot**
+— which fits a recovery image applied below the OS. The bootloader ships
+`v2`-encrypted (`u-boot-eg1510xs_encrypto_v2`) and decrypts with the same
+FW_KEY, and the plaintext bootloader is the only component carrying
+`crypt_boot!@2024`. **[proven]**
+
+From strings in the decrypted bootloader (no Ghidra trace yet):
+
+- it contains **no `BR0kh`** — the 2024 recovery container is keyed
+  differently from the firmware key; **[proven]**
+- it has **no `RSA`/`rsa`**, but does carry generic U-boot FIT
+  `signature`/`Hash`/`verify` library strings — whose mere presence does
+  **not** establish that secure boot is enforced; **[proven strings /
+  enforcement not established]**
+- its recovery paths look **integrity-checked but not authenticated**: a
+  *cloud recovery* downloads a firmware bin by `wget` and compares its
+  SHA-256 against a hash **supplied by the server in the same reply**
+  (`download bin sha256sum: %s, not equal to reply sha256sum: %s`), and a
+  *factory recovery* fetches `rgos.bin` over **TFTP** from `192.168.64.1`
+  (`[SYSTEM-RECOVERY] … tftpboot %s:%s`). A server-supplied hash over
+  `wget`, and TFTP, are integrity-against-corruption, **not** authenticity
+  against a MITM. **[inferred from strings — the control-flow that gates
+  an actual flash on these checks is not yet traced]**
+
+**What is not yet established, and must be before any claim:** whether the
+normal kernel boot enforces a FIT signature (secure boot); whether either
+recovery path authenticates the image beyond the server-provided hash; and
+the exact key/scheme of `upgrade_crypt_boot!@2024`. These need a Ghidra
+trace of the bootloader's `system_recovery` / `cloud_recovery` / FIT-verify
+functions. Flagged here because an unauthenticated recovery-flash path on
+the top-of-range device is exactly the kind of bootstrap-trust gap worth
+running down.
 
 ## 4. Recommendations
 

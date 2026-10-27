@@ -25,28 +25,43 @@ services around it.
 
 ## Scope and provenance
 
-Four vendor images, obtained from Ruijie:
+Vendor images obtained from Ruijie, across five router product lines:
 
 | build | product | arch |
 |---|---|---|
-| ReyeeOS 2.430.0.1924 (`EG_3.0(1)B11P430`) | RG-EG1510XS | `aarch64_cortex-a53` |
+| ReyeeOS 2.410 / 2.430.0 / 2.430.1 (`EG_3.0(1)B11P{410,430}`) | RG-EG1510XS (flagship) | `aarch64_cortex-a53` |
 | ReyeeOS 2.388 | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) |
 | ReyeeOS 2.380 | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) |
 | ReyeeOS 2.248.0.2216 (`EG_3.0(1)B11P248`) | RG-EG305GH-P-E | `aarch64_cortex-a53` |
 | ReyeeOS 2.388 / 2.410 / 2.430 | RG-EG305GH-P-E | `aarch64_cortex-a53` |
 | ReyeeOS 2.388 / 2.410 / 2.430 | RG-EG210G-P-V3 | `ramips_24kec` (MIPS32 LE) |
+| ReyeeOS 2.248.0.2212 (`EG_3.0(1)B11P248`) | RG-EG105G-V2 / -P-V2 (low-cost) | `ramips_24kec` (MIPS32 LE) |
+| ReyeeOS 2.280 / 2.300 / 2.340 | RG-EG105G-V2 / -P-V2 | `ramips_24kec` (MIPS32 LE) |
 
-The fourth image (RG-EG305GH-E, 2.248) was audited 2026-10-27
-(`firmware-audit.md` §3.14), followed the same day by six more — later
-RG-EG305GH-E builds and a **third product line, RG-EG210G-P-V3** — folded
-into the cross-build matrix in `firmware-audit.md` §3.15. Headline from
-that pass: the shared root hash, broker private keys, ACL and cloud
-credentials are **byte-identical across three product lines and current
-(2.430) firmware**; and of every build examined, **2.248 is the only one
-whose network-merge sink is `system()` with no input validator** — the
-others run the merge through an `execvp`-style wrapper, which is the
-control that actually blocks the in-the-wild payload. A seventh bundle,
-an RG-WALL NGFW (different OS), is noted but out of scope.
+The RG-EG305GH-E 2.248 image was audited 2026-10-27
+(`firmware-audit.md` §3.14), with six more that day (later RG-EG305GH-E
+builds and RG-EG210G-P-V3) and, on 2026-10-28, the full RG-EG1510XS
+flagship stream and the low-cost RG-EG105G-V2 stream — all folded into the
+cross-build matrix in `firmware-audit.md` §3.15. Headlines:
+
+- the shared root hash, broker private keys, ACL and cloud credentials are
+  **byte-identical across five product lines and the latest flagship
+  firmware** (RG-EG1510XS 2.430.1, released ~two weeks before writing);
+- the both-barriers-down `system()`-sink merge RCE is **not a single
+  anomalous image** — it is the 2.248 split-daemon posture, reproduced on
+  a second product line and a second architecture (**RG-EG105G-V2 2.248,
+  MIPS**, where the `system()` sink is decompiled and proven); every
+  unified-`easyson.elf` build (≥2.280 EG105G-V2, ≥2.388 EG305GH/EG210G,
+  all EG1510XS/EG105GW) runs the merge through an `execvp`-style wrapper,
+  which is the control that actually blocks the in-the-wild payload. The
+  low-cost EG105G-V2 ≤2.248 is a practical hardware-verification target;
+- an **open lead** (`firmware-audit.md` §3.16): the EG1510XS flagship's
+  latest recovery image uses a new `upgrade_crypt_boot!@2024` container
+  handled only in U-boot, whose recovery-fetch paths (server-supplied
+  SHA-256 over `wget`; TFTP `rgos.bin`) look integrity-checked but not
+  authenticated — not yet traced, flagged for follow-up.
+
+An RG-WALL NGFW bundle (different OS) is noted but out of scope.
 
 Method is static throughout: unpacked rootfs inspection plus Ghidra on
 `easyson.elf` and the support libraries. Findings are tagged `[proven]`

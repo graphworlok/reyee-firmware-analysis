@@ -27,6 +27,13 @@ No device was tested; no traffic was sent to any third party.
 | **ReyeeOS 2.380** | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) | **4.0-0** |
 | **ReyeeOS 2.388** | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) | **4.0-0** |
 
+Fifteen further router images (five product lines, ReyeeOS 2.248–2.430.1,
+aarch64 and MIPS) were added later and are enumerated in
+`firmware-audit.md` §1/§3.15. The two that matter for this document are
+the **split-daemon 2.248 builds** — RG-EG305GH-E (aarch64) and
+RG-EG105G-V2 (MIPS) — whose merge sink is `system()` (§8); every other
+image runs the unified `easyson.elf` with an `execvp`-style sink.
+
 Binaries, from the 2.430 image:
 
 | file | size | sha256 |
@@ -457,11 +464,40 @@ EG105GW) — so barrier one is absent, as on all MIPS builds. **But its
 merge builder calls `son_utils_safe_exec`** (argv/`execvp`), not
 `system()`, so barrier two *is* present and geico's quote-breakout has no
 shell to land in. This settles the question §8 left open for the MIPS
-line in the direction of "not exploitable at the sink": across every
-image examined, the **only** build whose merge sink is `system()` is
-2.248 EG305GH. The metacharacter blocklist is not the load-bearing
-control; the `execvp`-style sink is, and 2.248 is the build that dropped
-it. Full matrix in `firmware-audit.md` §3.15.
+line in the direction of "not exploitable at the sink" **for the unified
+`easyson.elf` builds**: the metacharacter blocklist is not the
+load-bearing control; the `execvp`-style sink is.
+
+**The 2.248 `system()` sink is now proven on MIPS, on a second product
+line.** *(Added 2026-10-28.)* The sink being `system()` is not unique to
+the aarch64 EG305GH. The low-cost **RG-EG105G-V2** at ReyeeOS 2.248.0.2212
+(MIPS) ships the same split `easydisc.elf` + `mqtt.elf` with no
+`param_safety_check` and no `son_utils_safe_exec`, and its merge builder
+decompiles cleanly:
+
+```c
+undefined4 FUN_00417da8(a, b, c) {               // easydisc.elf, md5 30771304…
+  char buf[256];
+  memset(buf, 0, 0x100);
+  snprintf(buf, 0x100,
+      "dev_sta set -m esw_networkId_merge '{\"password\":\"admin\", "
+      "\"type\":\"noenc\",\"force\":\"true\",\"fromSn\":[\"%s\"],"
+      "\"fromNetworkId\":\"%s\",\"toNetworkId\":\"%s\"…", a, b, c);
+  system(buf);                                   // PTR_system_0044a008 — bare system()
+  …
+}
+```
+
+Three message-derived `%s` interpolated into a single-quoted shell string
+and passed straight to `system()` — byte-for-byte the construction traced
+on EG305GH 2.248 (`FUN_0040f174`), now on a second architecture. **[proven]**
+So "2.248" is a *posture* — the both-barriers-down split-daemon era —
+reproduced across at least two product lines, and on EG105G-V2 it is
+remediated at **2.280** (2.280/2.300/2.340 revert to the unified
+`easyson.elf` with both barriers restored). Because the EG105G-V2 is a
+low-cost, readily-obtainable device, it is the practical platform on which
+this datagram could be verified against hardware. Full matrix in
+`firmware-audit.md` §3.15.
 
 ## 9. Hardcoded credentials in the merge path
 
