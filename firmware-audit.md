@@ -16,9 +16,12 @@ protocol and one in-the-wild exploit; this one is the answer to "what
 
 ## 1. Scope, provenance and method
 
-Four vendor images, obtained from Ruijie. No device was tested, no
-traffic was sent to any Ruijie service, no credential was cracked or
-used.
+Four vendor images, obtained from Ruijie. No *physical* device was
+tested, no traffic was sent to any Ruijie service, no credential was
+cracked or used. Findings are static analysis unless marked otherwise;
+the one dynamic exception is §3.14's esw merge injection, confirmed by
+running the unmodified vendor discovery daemon under emulation
+(`easydisc-emulation-confirmation.md`).
 
 | build | product | arch | easydisc pkg |
 |---|---|---|---|
@@ -681,9 +684,46 @@ from the discovery packet and there is no validator between recv and
 [`easydisc-protocol.md`](easydisc-protocol.md) §8 for the match to the
 in-the-wild payload (same salt, `reserve1 == "l3"`, `networkId` as the
 injected field) and for the two offsets reasoned-but-not-traced-to-the-
-byte. The daemon does retain the salted-MD5 framing gate (`Msg's md5 is
+byte in static analysis — the first of which (the `networkId` → merge
+`fromNetworkId` mapping) is confirmed dynamically below. The daemon does
+retain the salted-MD5 framing gate (`Msg's md5 is
 illegality … drop it`), which is an integrity check keyed by the same
 shipped salt, not input sanitisation.
+
+**Dynamically confirmed, over the network, on the little-endian build.**
+*(Added 2026-11-09.)* The static sink above was reproduced at runtime
+against **unmodified vendor firmware** — the little-endian MIPS sibling of
+this build, **RG-EG105G-V2 2.248** (`EG_3.0(1)B11P248`, o32 `mips32r2`),
+whose `easydisc.elf` carries the byte-identical `FUN_0040f174` template.
+The vendor rootfs runs in an isolated QEMU/OpenWrt guest (a from-source
+`malta/le` kernel with `CONFIG_MIPS_FP_SUPPORT=y`, because the hard-float
+vendor binaries SIGILL on a stock kernel); `ubusd` and the unmodified
+`easydisc.elf` are started under a minimal esw-master config, and a single
+crafted UDP/43562 datagram is delivered **from a separate host over the
+bridge** (the sink at `10.200.0.1`, not a loopback send). The daemon reaches
+master state and logs, once per datagram: **[proven dynamically]**
+
+```
+[esw] Exec auto merge cmd: dev_sta set -m esw_networkId_merge '{"password":"admin",
+ "type":"noenc","force":"true","fromSn":[""],"fromNetworkId":"'; echo pwn>/tmp/easydisc/P #","toNetworkId":"0"}' -b 1
+```
+
+and the injected command runs as root (the marker file is created). This
+also resolves the first of the two offsets `easydisc-protocol.md` §8 left
+reasoned-but-not-traced: the packet's `networkId` field (+0x150) is what
+lands in the template's `fromNetworkId`, verbatim — the breakout `'` closes
+the quoted value, `;` starts a command, `#` comments the tail. The next
+release of the same product, **EG105G-V2 2.280** (unified `easyson.elf`),
+run through the identical harness while healthy and in master state,
+produces **no execution** — the expected 2.248→later contrast, though the
+null result was not dynamically attributed to validator-versus-`execvp`
+(the static trace already did that). Full method, run identifiers and
+hashes are in
+[`easydisc-emulation-confirmation.md`](easydisc-emulation-confirmation.md);
+sandbox runs `20261109-093125` (positive) and `20261109-095051` (negative).
+This is still emulation — an OpenWrt kernel rather than the vendor kernel/SoC,
+and a benign crafted packet rather than geico's captured bytes — not a test
+on physical hardware.
 
 **Unchanged and identical to the other builds** (`etc/shadow`,
 `etc/config/dropbear`, `etc/config/mqlink_reg`): the root hash
