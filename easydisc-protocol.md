@@ -19,7 +19,10 @@ needs in order to check their own builds.
 
 Everything below is derived from vendor firmware, obtained from Ruijie,
 plus packet captures of live exploitation attempts against this network.
-No device was tested; no traffic was sent to any third party.
+No *physical* device was tested; no traffic was sent to any third party.
+The one dynamic result — §8's esw merge injection run against the
+unmodified vendor daemon under emulation — is marked where it appears
+(`easydisc-emulation-confirmation.md`).
 
 | build | product | arch | easydisc pkg |
 |---|---|---|---|
@@ -452,6 +455,32 @@ statement is that 2.248 is a shipping build on which geico's datagram is
 its `reserve1`/`networkId` layout lines up with a root `system()` — i.e.
 this is the kind of build the payload was developed against, established
 statically and short of execution.
+
+**Now carried through to execution, over the network.** *(Added
+2026-11-09.)* The static sink above was run against **unmodified vendor
+firmware**: RG-EG105G-V2 2.248 (little-endian o32 MIPS, the LE sibling of
+the EG305GH build, byte-identical `FUN_0040f174` template). The vendor
+rootfs runs in an isolated QEMU/OpenWrt guest (a from-source `malta/le`
+kernel with `CONFIG_MIPS_FP_SUPPORT=y` — the hard-float vendor binaries
+SIGILL otherwise); `ubusd` + the unmodified `easydisc.elf` start under a
+minimal esw-master config, and one crafted UDP/43562 datagram is delivered
+**from a separate host over the bridge** (not a loopback send). The daemon
+reaches master state and logs, once per datagram, `Exec auto merge cmd:
+dev_sta set -m esw_networkId_merge '{"password":"admin", … "fromNetworkId":"';
+echo pwn>/tmp/easydisc/P #", …}'`, and the injected command runs as root
+(the marker file is created). This settles two of the "not traced to the
+byte" items above: the wire-offset `0x150` `networkId` **does** land in the
+slot used as `fromNetworkId` (it appears verbatim in the logged command),
+and the `snprintf(…,0x100,…)` margin is sufficient for the delivered
+command. The next release of the same product — EG105G-V2 2.280 (unified
+`easyson.elf`) — run through the identical harness while healthy and in
+master state, produces **no execution**, the expected contrast (not
+dynamically attributed to validator-vs-`execvp`; the static trace did
+that). Still emulation, not physical hardware: an OpenWrt kernel rather
+than the vendor kernel/SoC, and a benign crafted packet rather than geico's
+captured bytes. Method, run identifiers (`20261109-093125` positive,
+`20261109-095051` negative) and hashes:
+[`easydisc-emulation-confirmation.md`](easydisc-emulation-confirmation.md).
 
 **And the second barrier, left open above, is now observed on a MIPS
 build.** *(Added 2026-10-27.)* A third product line — RG-EG210G-P-V3,
