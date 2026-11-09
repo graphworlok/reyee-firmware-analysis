@@ -16,19 +16,44 @@ protocol and one in-the-wild exploit; this one is the answer to "what
 
 ## 1. Scope, provenance and method
 
-Three vendor images, obtained from Ruijie. No device was tested, no
-traffic was sent to any Ruijie service, no credential was cracked or
-used.
+Four vendor images, obtained from Ruijie. No *physical* device was
+tested, no traffic was sent to any Ruijie service, no credential was
+cracked or used. Findings are static analysis unless marked otherwise;
+the one dynamic exception is §3.14's esw merge injection, confirmed by
+running the unmodified vendor discovery daemon under emulation
+(`easydisc-emulation-confirmation.md`).
 
 | build | product | arch | easydisc pkg |
 |---|---|---|---|
-| **ReyeeOS 2.430.0.1924** (`EG_3.0(1)B11P430`, `mediatek/eg1510xs`) | RG-EG1510XS | `aarch64_cortex-a53` | 4.0-0 |
+| **ReyeeOS 2.430.0.1924 / 2.410 / 2.430.1.2128** (`EG_3.0(1)B11P{430,410}`, `mediatek/eg1510xs`) | RG-EG1510XS (flagship) | `aarch64_cortex-a53` | merged `easyson.elf` |
 | **ReyeeOS 2.388** | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) | 4.0-0 |
 | **ReyeeOS 2.380** | RG-EG105GW(T) | `ramips_24kec` (MIPS32 LE) | 4.0-0 |
+| **ReyeeOS 2.248.0.2216** (`EG_3.0(1)B11P248`, `mediatek/eg305gh-e`) | RG-EG305GH-P-E | `aarch64_cortex-a53` | split `mqtt.elf` + `easydisc.elf` |
+| **ReyeeOS 2.388 / 2.410 / 2.430** (`EG_3.0(1)B11P{388,410,430}`, `mediatek/eg305gh-e`) | RG-EG305GH-P-E | `aarch64_cortex-a53` | merged `easyson.elf` |
+| **ReyeeOS 2.388 / 2.410 / 2.430** (`EG_3.0(1)B11P{388,410,430}`, `ramips/generic`) | RG-EG210G-P-V3 | `ramips_24kec` (MIPS32 LE) | merged `easyson.elf` |
+| **ReyeeOS 2.248.0.2212** (`EG_3.0(1)B11P248`) | RG-EG105G-V2 / -P-V2 (low-cost) | `ramips_24kec` (MIPS32 LE) | split `mqtt.elf` + `easydisc.elf` |
+| **ReyeeOS 2.280 / 2.300 / 2.340** (`EG_3.0(1)B11P{280,300,340}`) | RG-EG105G-V2 / -P-V2 | `ramips_24kec` (MIPS32 LE) | merged `easyson.elf` |
+
+The fourth image (2.248 EG305GH) was added 2026-10-27 and is written up
+in §3.14; six further images (RG-EG305GH-E and a third product line,
+**RG-EG210G-P-V3**, each at 2.388 / 2.410 / 2.430) were added the same day
+and drive the cross-build matrix in **§3.15**. On 2026-10-28 the full
+**RG-EG1510XS** flagship stream (2.410, latest 2.430.1, and a 2.430.0
+recovery image) and the low-cost **RG-EG105G-V2** stream (2.248 / 2.280 /
+2.300 / 2.340) were added: the EG105G-V2 2.248 reproduces the 2.248 merge
+RCE on a second product line and a second architecture (§3.15), and the
+EG1510XS flagship was found to **boot an unsigned (hash-only) kernel behind
+an unauthenticated HTTP/TFTP recovery fetch**, with a new
+`upgrade_crypt_boot!@2024` container — **§3.16**. The three original images drive §3.1–§3.13
+unless noted. A further bundle, an **RG-WALL 1600-Z-S** NGFW
+(`NGFW_NTOS 1.0R6P1`), is a different OS — not ReyeeOS/OpenWrt, no SON
+stack in the Reyee layout — and is out of scope for this document; it was
+decrypted to an `INSTALL!` image and not further analysed here.
 
 Method: static analysis of the unpacked rootfs and of `easyson.elf`
-(aarch64, 2.430) in Ghidra, plus config and key-material inspection
-across all three trees. Vendor source filenames and line numbers quoted
+(aarch64, 2.430) — and, for the 2.248 split-daemon builds, of `mqtt.elf`
+and `easydisc.elf` — in Ghidra, plus config and key-material inspection
+across all trees. Vendor source filenames and line numbers quoted
 below are the vendor's own, recovered from `dbg_printf` arguments
 (`core/mosq_thd.c`, `interface/ubus.c`, `enet_network/enet_network.c`).
 
@@ -536,6 +561,429 @@ reaches the equivalent template through `son_utils_safe_exec` (argv,
 any attacker-influenced field reaches `0x0045ace4`, and by what route,
 was not traced and is not claimed.** It is recorded so the next reader
 starts here rather than rediscovering it.
+
+### 3.14 A fourth build (2.248, RG-EG305GH-E) carries the same chain, with the merge password in cleartext and the broker left open
+
+*(Added 2026-10-27.)* A fourth vendor image was obtained and audited:
+**ReyeeOS 2.248.0.2216** (`EG_3.0(1)B11P248`, `mediatek/eg305gh-e`),
+product **RG-EG305GH-P-E**, `aarch64_cortex-a53`, built 2023-10-10. It
+is a *different* product from the three in §1 and a **lower** version
+number than any of them, which widens the "same across the product line
+and versions" claim rather than narrowing it. Decryption was the public
+`upgrade_crypt`/`FW_KEY` procedure (`easydisc-protocol.md` §11); the
+rootfs is a single squashfs. On this build the SON daemon is **split**
+into `/usr/sbin/mqtt.elf` (the MQTT client and upgrade/shell handlers)
+and `/usr/sbin/easydisc.elf` (the UDP discovery protocol), where 2.430
+had one `easyson.elf`. Vendor source filenames below are again the
+vendor's own, from `dbg_printf`/`dbg_logfile` arguments (`upgrade/upgrade.c`,
+`sync/sync_exec_thd.c`, `mosq/mosq.c`, `esw_disc/esw_disc.c`). All
+addresses are from the aarch64 Ghidra import of these two binaries.
+
+**The §3.12 upgrade chain is present unchanged in substance.** `mqtt.elf`
+subscribes to `sys/001/AP/+/%s/upgrade` (`FUN_00426ddc`, `%s` = serial),
+the handler `FUN_004267d4` copies `url`/`fileName`/`fileSize`/`md5`/
+`version`/`delayTime` straight out of the JSON `msg` with no validator,
+and the download thread `FUN_004264e4` builds **[proven]**
+
+```c
+snprintf(buf, 0x800, "curl -L -k '%s%s' -o '%s' >/dev/null", url, fileName, "/tmp/image.tar.gz");
+system(buf);                                            // upgrade/upgrade.c
+...
+snprintf(buf, 0x100, "/sbin/sysupgrade -v %s 2>/dev/null ", "/tmp/image.tar.gz");
+system(buf);                                            // FUN_00426454
+```
+
+Same injection shape as §3.12 — a `'` in `url` or `fileName` closes the
+quote — now with `curl -L -k` (**`-k` disables TLS certificate
+verification on the download**, so an `https://` URL is no protection).
+The `md5` and `version` fields are parsed and logged but **never used**:
+the download loop (`FUN_004264e4`) only waits for the file to reach
+`fileSize` bytes, then hands it to `sysupgrade`. So, as in §3.12, nothing
+on this path authenticates the image. **[proven]**
+
+**A second remote-root surface on the same bus: shell-command execution.**
+`mqtt.elf` also subscribes to `sys/001/AP/+/%s/rpc/shell/request/+` and
+`sys/001/AP/0/%s/shreq`, pulls a `cmds` string from the payload, and its
+`exec_cmd_task` (`sync/sync_exec_thd.c`, `FUN_0042a90c`) runs it
+directly: **[proven]**
+
+```c
+if (ctx->want_response == 0) system(ctx->cmd);          // fire-and-forget
+else                         popen_capture(ctx->cmd, &out);   // FUN_00422ce8 -> popen(cmd,"r")
+```
+
+This is an *intended* remote-shell feature, not a parsing slip — which is
+exactly why it matters: any party that can publish to the bus has a root
+shell by design. (The same transport exists over UDP discovery:
+`easydisc.elf` carries `DISC_MSG_TPYE_SH, cmd:%s` and a `check_cmd_task`
+exec queue, matching the `0x61` surface in `easydisc-protocol.md` §5.)
+
+**The on-disk broker is weaker here than in §3.1–3.4, not stronger.**
+`/etc/mosquitto/mosquitto.conf` is **38 bytes in full**: **[proven]**
+
+```
+max_connections 33
+socket_domain ipv4
+```
+
+No `listener` (so mosquitto 1.5.9 binds the default `0.0.0.0:1883`), no
+`password_file`, no `acl_file`, no `allow_anonymous`, and **no TLS
+material at all** — there is no `etc/easyson/ca/` tree on this image and
+no `psk_file`. The init script (`/etc/init.d/mosquitto`, `use_uci 0`)
+launches `mosquitto -c /etc/mosquitto/mosquitto.conf` verbatim, so this
+static file is authoritative. With no `password_file` configured,
+mosquitto 1.5.x accepts **anonymous** connections, so the §3.4 "shared
+credential + `#` ACL" precondition collapses to *no credential and no
+ACL* on the local bus. **[config proven; the anonymous-by-default
+behaviour is the documented mosquitto 1.5.9 semantics for a config with
+no password_file]** The WAN zone is still `input REJECT`
+(`etc/config/firewall`), so this is LAN/mesh-reachable, not
+internet-facing, exactly as in §3.12.
+
+The client half confirms the plaintext posture: `mqtt.elf`'s
+`FUN_0041adf8` (`mosq/mosq.c`) calls **[proven]**
+
+```c
+mosquitto_username_pw_set(mosq, "ruijie", "reyeeos");   // cleartext, no TLS
+mosquitto_connect(mosq, master_ip_or_127.0.0.1, brokerPort /* 1883 */, 15);
+```
+
+`reyeeos` is a new cleartext broker password literal, distinct from the
+`ruijie:$6$…` hashes of §3.3; with anonymous access allowed the broker
+does not even enforce it.
+
+**The auto-merge credential is plaintext `admin` and the sink is a bare
+`system()`.** This is §3.13's "lead", resolved for this product.
+`easydisc.elf`'s `FUN_0040f174` (`esw_disc/esw_disc.c`) is **[proven]**
+
+```c
+snprintf(buf, 0x100,
+  "dev_sta set -m esw_networkId_merge "
+  "'{\"password\":\"admin\",\"type\":\"noenc\",\"force\":\"true\","
+  "\"fromSn\":[\"%s\"],\"fromNetworkId\":\"%s\",\"toNetworkId\":\"%s\"}' -b 1",
+  fromSn, fromNetworkId, toNetworkId);
+system(buf);                                            // PLT stub -> system
+dbg_logfile(..., "Exec auto merge cmd: %s", buf);
+```
+
+Three fields drawn from the discovery message are interpolated inside
+single quotes and passed to `system()`. Unlike 2.430 — which reaches the
+equivalent template through `son_utils_safe_exec` (argv/`execvp`) and
+calls `param_safety_check` first (§3.13) — `easydisc.elf` here links
+`libeasydisc.so`, **not** `liblib_c.so`, and `param_safety_check` does
+not appear anywhere in the daemon. The merge password is the literal
+`admin` with `"type":"noenc"` and `"force":"true"`, where 2.430/2.380/
+2.388 used an encrypted `U2FsdGVkX18…` blob. The caller
+(`FUN_0040f548`) gates this on device mode, on the message `networkId`
+differing from the device's own, and on `strncmp(reserve1, "l3", …)` —
+and `fromSn`/`fromNetworkId` are read from the received message struct.
+That is the reachability question left open for `0x0045ace4` in §3.13,
+now answered for this build: the sink's attacker-influenced fields come
+from the discovery packet and there is no validator between recv and
+`system()`. **This is the geico packet's path** — see
+[`easydisc-protocol.md`](easydisc-protocol.md) §8 for the match to the
+in-the-wild payload (same salt, `reserve1 == "l3"`, `networkId` as the
+injected field) and for the two offsets reasoned-but-not-traced-to-the-
+byte in static analysis — the first of which (the `networkId` → merge
+`fromNetworkId` mapping) is confirmed dynamically below. The daemon does
+retain the salted-MD5 framing gate (`Msg's md5 is
+illegality … drop it`), which is an integrity check keyed by the same
+shipped salt, not input sanitisation.
+
+**Dynamically confirmed, over the network, on the little-endian build.**
+*(Added 2026-11-09.)* The static sink above was reproduced at runtime
+against **unmodified vendor firmware** — the little-endian MIPS sibling of
+this build, **RG-EG105G-V2 2.248** (`EG_3.0(1)B11P248`, o32 `mips32r2`),
+whose `easydisc.elf` carries the byte-identical `FUN_0040f174` template.
+The vendor rootfs runs in an isolated QEMU/OpenWrt guest (a from-source
+`malta/le` kernel with `CONFIG_MIPS_FP_SUPPORT=y`, because the hard-float
+vendor binaries SIGILL on a stock kernel); `ubusd` and the unmodified
+`easydisc.elf` are started under a minimal esw-master config, and a single
+crafted UDP/43562 datagram is delivered **from a separate host over the
+bridge** (the sink at `10.200.0.1`, not a loopback send). The daemon reaches
+master state and logs, once per datagram: **[proven dynamically]**
+
+```
+[esw] Exec auto merge cmd: dev_sta set -m esw_networkId_merge '{"password":"admin",
+ "type":"noenc","force":"true","fromSn":[""],"fromNetworkId":"'; echo pwn>/tmp/easydisc/P #","toNetworkId":"0"}' -b 1
+```
+
+and the injected command runs as root (the marker file is created). This
+also resolves the first of the two offsets `easydisc-protocol.md` §8 left
+reasoned-but-not-traced: the packet's `networkId` field (+0x150) is what
+lands in the template's `fromNetworkId`, verbatim — the breakout `'` closes
+the quoted value, `;` starts a command, `#` comments the tail. The next
+release of the same product, **EG105G-V2 2.280** (unified `easyson.elf`),
+run through the identical harness while healthy and in master state,
+produces **no execution** — the expected 2.248→later contrast, though the
+null result was not dynamically attributed to validator-versus-`execvp`
+(the static trace already did that). Full method, run identifiers and
+hashes are in
+[`easydisc-emulation-confirmation.md`](easydisc-emulation-confirmation.md);
+sandbox runs `20261109-093125` (positive) and `20261109-095051` (negative).
+This is still emulation — an OpenWrt kernel rather than the vendor kernel/SoC,
+and a benign crafted packet rather than geico's captured bytes — not a test
+on physical hardware.
+
+**Unchanged and identical to the other builds** (`etc/shadow`,
+`etc/config/dropbear`, `etc/config/mqlink_reg`): the root hash
+`root:$1$zOItWvpX$tKgP2GnQDoUZn16hVplYv1` (MD5-crypt, byte-for-byte the
+§3.5 value), `RootPasswordAuth 'on'` on port `54133`, and the §3.6 cloud
+`appid`/`secret`/`nonce`/`unbind_key` all identical. `etc/shadow` also
+carries a second account, `admin:$1$zzg8tSF4$11/YBCBzy/ROjOY3f.jX..`
+(also MD5-crypt) — not present in the earlier trees examined. No hash was
+cracked; this is the algorithm and the fact of sharing only.
+
+**Net effect.** The two findings that matter most — §3.12 (remote root
+via the upgrade topic) and §3.4 (open control bus) — are both *worse* on
+this shipping product: the upgrade download now also disables TLS
+verification (`curl -k`), the bus requires no credential at all, and a
+by-design remote-shell topic sits on the same bus. A fourth product and a
+lower version number carrying the same chain is the strongest evidence
+yet that this is a platform-wide design, not a per-model regression.
+
+### 3.15 Cross-build matrix — three product lines, and which barrier actually protects the device
+
+*(Added 2026-10-27; extended 2026-10-28 with the RG-EG1510XS and
+RG-EG105G-V2 streams.)* Fourteen further ReyeeOS router images were
+obtained as vendor upgrade bundles (`.zip` → gzip → tar of metadata + an
+`encrypto_v1`/`v2` container; decryption per `easydisc-protocol.md` §11
+for v2, the `upgrade_crypt_v1` XOR scheme of §3.14 for v1). They add two
+more product lines — **RG-EG210G-P-V3** (MIPS) and the low-cost
+**RG-EG105G-V2** (MIPS) — plus the full **RG-EG1510XS** flagship stream
+(2.410 and the latest 2.430.1, released ~mid-October 2026), so the
+shared-secret and discovery-path findings can now be read against product,
+architecture **and** version separately rather than all varying together
+(the caveat that bounded §3.13/§8). Five router product lines in all.
+
+**What is byte-identical everywhere.** Across every router image examined
+— RG-EG1510XS, RG-EG105GW(T), RG-EG305GH-E, RG-EG210G-P-V3 and
+RG-EG105G-V2, spanning aarch64 and MIPS and ReyeeOS 2.248 through the
+latest 2.430.1 — the following are the same bytes: **[proven]**
+
+- the root hash `root:$1$zOItWvpX$tKgP2GnQDoUZn16hVplYv1` (§3.5);
+- the broker private keys `server.key` md5 `5b60f5bf…` (2048-bit) and
+  `e9124cc8…` (1024-bit) and `ca.crt` `880bbe79…` (§3.1) — present on the
+  EG305GH and EG210G trees at 2.388/2.410/2.430, identical to the §3.1
+  values;
+- the ACL granting `topic #` to `ruijie` and `son` (§3.4);
+- the cloud `appid`/`secret`/`unbind_key` (§3.6);
+- `RootPasswordAuth 'on'` on port `54133` (§3.5);
+- the Easydisc salt `03251584460325158446032515844600`
+  (`easydisc-protocol.md` §3).
+
+So §3.1, §3.4, §3.5 and §3.6 are not artefacts of three images — they
+hold on five product lines and on the **latest flagship firmware
+(RG-EG1510XS 2.430.1.2128), released ~two weeks before this was written**.
+This is the central point: the shared-secret exposure is platform-wide
+and still shipping in the newest build of the top-of-range device. The
+EG105G-V2 adds the same root hash, the same `admin:$1$zzg8tSF4$…` entry
+(§3.14) and the same broker keys, extending the exposure to the
+lowest-cost device in the range.
+
+**Where the builds differ: the two barriers on the discovery → merge
+path.** geico's packet (`easydisc-protocol.md` §8) is stopped on 2.430
+EG1510XS by *either* of two independent barriers — (1) the
+`param_safety_check` shell-metacharacter blocklist on the esw hello
+path, and (2) the merge sink being `son_utils_safe_exec`
+(argv/`execvp`, no shell) rather than `system()`. Reading both barriers
+across the builds: **[proven except where noted]**
+
+| build | product / arch | daemon | barrier 1: `param_safety_check` on esw hello path | barrier 2: merge sink | broker |
+|---|---|---|---|---|---|
+| **2.248** | EG305GH aarch64 | split `easydisc.elf` + `mqtt.elf` | **absent** (daemon doesn't link `liblib_c.so`) | **`system()` / shell** (§3.14, `FUN_0040f174`) | **open / anonymous** (§3.14) |
+| **2.248** | **EG105G-V2 MIPS** | split `easydisc.elf` + `mqtt.elf` | **absent** | **`system()` / shell** — proven, `FUN_00417da8`→`system` | **open / anonymous** (`max_connections 33`, no listener) |
+| 2.280 / 2.300 / 2.340 | EG105G-V2 MIPS | `easyson.elf` | **present** | `son_utils_safe_exec` / `execvp` | shared-key TLS |
+| 2.380 / 2.388 | EG105GW MIPS | `easyson.elf` | **absent** (§3.13) | not settled in §8 | shared-key TLS |
+| 2.388 / 2.410 / 2.430 | EG305GH aarch64 | `easyson.elf` | imported; call-on-path not re-traced | `son_utils_safe_exec` (import + `type:enc` `%s` template) | shared-key TLS |
+| 2.388 / 2.410 / 2.430 | EG210G MIPS | `easyson.elf` | **absent** (confirmed 2.430) | **`son_utils_safe_exec` / `execvp`** (confirmed 2.430) | shared-key TLS |
+| 2.410 / 2.430.1 | EG1510XS aarch64 | `easyson.elf` | **present** | `son_utils_safe_exec` / `execvp` | shared-key TLS |
+| 2.430.0 | EG1510XS aarch64 | `easyson.elf` | **present** (§3.13) | `son_utils_safe_exec` / `execvp` (§9) | shared-key TLS (§3.1) |
+
+**Two product lines ship the vulnerable 2.248 posture, and the EG105G-V2
+sink is proven on MIPS.** The split-daemon, no-validator, `system()`-sink,
+open-broker design of §3.14 is not unique to the EG305GH: the low-cost
+**RG-EG105G-V2** at ReyeeOS 2.248.0.2212 carries the byte-for-byte same
+architecture. Its `easydisc.elf` merge builder decompiles to
+`snprintf(buf, 0x100, "dev_sta set -m esw_networkId_merge '{\"password\":\"admin\", \"type\":\"noenc\",\"force\":\"true\",\"fromSn\":[\"%s\"],\"fromNetworkId\":\"%s\",\"toNetworkId\":\"%s\"…", a, b, c)` followed by a bare
+`system(buf)` (`FUN_00417da8`, sink `PTR_system_0044a008`) — the same
+three packet-derived `%s` inside single quotes, into `system()`, with no
+`execvp` or `son_utils_safe_exec` present and no `param_safety_check` in
+the daemon. This is the identical construction traced on EG305GH 2.248
+(`FUN_0040f174`), now confirmed on a second product line and a second
+architecture. **[proven]** On EG105G-V2 the fix lands at **2.280**: 2.280,
+2.300 and 2.340 all revert to the unified `easyson.elf` with both barriers
+restored. So "2.248" names a *posture* — the both-barriers-down
+split-daemon era — shared by at least two product lines, not a single
+anomalous image; and the EG105G-V2 is a low-cost, readily-obtainable
+device on which that posture can be verified against hardware.
+
+The EG210G 2.430 row was traced in Ghidra: `esw_disc_handle_hello_msg`
+(`0x423434`) copies the 460-byte header and validates only with
+`son_check_ipv4` / `strcmp` / `strncmp` / `strlen` — no
+`param_safety_check` — exactly as the EG105GW MIPS builds do, and a GOT
+scan places every `param_safety_check` site (16, in the same seven
+`*_uf_cb` / `enetCap_*` functions as EG105GW) off the discovery path.
+But its merge builder (`FUN_0042214c`) assembles the `dev_sta set -m
+esw_networkId_merge` argv and calls **`son_utils_safe_exec`**, not
+`system()`. So on EG210G the first barrier is absent and the second is
+present. **[proven]**
+
+**The conclusion that matters.** Both builds with the sink at `system()`
+and no validator — i.e. both barriers down — are **2.248 split-daemon
+builds**: EG305GH 2.248 (aarch64) and EG105G-V2 2.248 (MIPS). Every build
+that runs the unified `easyson.elf` (every ≥2.280 EG105G-V2, every ≥2.388
+EG305GH/EG210G, and all EG1510XS/EG105GW images) routes the merge through
+`son_utils_safe_exec`/`execvp`, so geico's `'…|sh'` has no shell to break
+into and is inert at the sink — even on the MIPS builds where the
+blocklist is also absent. The load-bearing protection across the fleet is
+therefore **the `execvp`-style sink, not the metacharacter blocklist**,
+and the 2.248 era is precisely when the sink was `system()`. That sharpens
+§3.14 (2.248 is a *posture*, reproduced on at least two product lines and
+two architectures, not one anomalous image) and answers the §8 question of
+what build geico was developed against: one shaped like 2.248. The vendor
+should read the `system()` merge sink and the open broker of the 2.248
+split-daemon builds as the regression to explain, and the shared secrets
+of §3.15 as the platform-wide exposure that outlives any single build.
+
+*(Method note: the v2 images decrypt with `EVP_BytesToKey(MD5, salt,
+FW_KEY, iter=2023)` + AES-256-CBC after stripping the
+`upgrade_crypt_v2!@2023` line and base64-decoding; the EG210G
+`install_encrypto_v2.bin` is a raw install image with the rootfs
+squashfs at a `hsqs` offset to be carved, not a sysupgrade tar. Scripts
+in the session scratchpad `tools/`.)*
+
+**Disclosure status of the §3.14 change — silent in the changelogs, and
+unpublished as a CVE.** *(Added 2026-10-27.)* Two checks bear on whether
+the move away from the 2.248 posture was ever disclosed as a security
+fix:
+
+- **The vendor release notes are silent.** The "Resolved Issues" in the
+  RG-EG 2.388, 2.410 and 2.430 release notes (the PDFs shipped inside the
+  upgrade bundles) list only functional defects — link-detection loss,
+  factory-reset failure, topology display, DHCP pool exhaustion, a
+  cloud-Portal DoS in Myanmar. **None** mentions Easydisc, SON, the
+  discovery path, the network-merge command, the broker, command
+  injection or any security hardening. So in the vendor's own changelogs
+  the 2.248→later change is not described at all, let alone as a security
+  fix. **[proven from the shipped documents]**
+- **No public CVE or advisory names this vector.** A search of NVD, CISA,
+  the GitHub Advisory Database, Claroty/Team82's Ruijie research and
+  Ruijie's own security bulletins finds a large Reyee cluster, but every
+  published item is a *different* surface: the EWEB web interface
+  (CVE-2023-34644), an authenticated `updateVersion` RCE
+  (CVE-2021-43164), and — most relevantly — the 2024 **MQTT/cloud**
+  cluster (Claroty "Open Sesame"; CISA ICSA-24-338-01; CVE-2024-45722
+  calculable MQTT credentials, -47791 partial-topic subscription, -46874
+  cross-device command over MQTT, -52324 MQTT message → OS command). No
+  public source ties a vulnerability to **Easydisc / SON discovery / UDP
+  43561-43562 / the esw `networkId` merge**. The protocol's existence and
+  ports are public (a Ruijie community forum post), but the merge-sink
+  command injection is not. **Absence of a found advisory is not proof
+  none exists, but the main registries were checked.**
+
+Two consequences worth stating plainly for the vendor and any CNA:
+
+1. **The MQTT side of this audit substantially overlaps the already-
+   published 2024 cluster.** The shared/weak broker credentials (§3.3),
+   the permissive topic access (§3.4) and the MQTT upgrade-topic command
+   path (§3.12) correspond in kind to CVE-2024-45722 / -47791 / -46874 /
+   -52324, and the disclosed affected range (Reyee OS 2.206.x–2.320.x)
+   **includes 2.248**. These findings sharpen and give device-side detail
+   to known issues rather than being wholly novel.
+2. **The Easydisc discovery-protocol merge RCE (§3.14, `easydisc-protocol.md`
+   §8) appears genuinely undisclosed.** It is a distinct transport (local
+   UDP, not MQTT/cloud), it is the vector the in-the-wild *geico* family
+   actually uses, and it has no matching CVE or release-note entry. If the
+   2.248→later change remediated it, that remediation was silent; if it is
+   merely architectural convergence, current firmware of other builds is
+   protected only by the `execvp` sink (§3.15) and not by any acknowledged
+   fix. This is the item that most warrants a CVE.
+
+### 3.16 The flagship boots an unsigned kernel, and its recovery fetch is unauthenticated
+
+*(Added 2026-10-28.)* Chasing the new recovery container on the RG-EG1510XS
+flagship led to a more consequential result: **U-boot does not
+cryptographically verify the kernel it boots, and the cloud/TFTP recovery
+paths deliver firmware without authenticating it.** The device's boot and
+recovery trust rests on integrity hashes and plaintext transport, not on
+signatures.
+
+**The new container.** The flagship's latest build adds a recovery image,
+`EG_3.0(1)B11P430_EG1510XS_…_install_recovery_encrypto.bin`, whose magic is
+`upgrade_crypt_boot!@2024` followed by raw (not base64) ciphertext — a
+third scheme distinct from the `upgrade_crypt_v1` XOR (§3.14) and
+`upgrade_crypt_v2` OpenSSL (§11) containers. The OS rootfs never references
+it (a whole-tree scan of 2.430.1 finds `upgrade_crypt_v2` in
+`lib/upgrade/platform.sh` and `usr/lib/shell/upgrade_check.sh` but **no**
+`upgrade_crypt_boot` anywhere); the only component carrying
+`crypt_boot!@2024` is **U-boot**, which fits a recovery image applied below
+the OS. The bootloader itself ships `v2`-encrypted
+(`u-boot-eg1510xs_encrypto_v2`, decrypts with the same FW_KEY) and is
+**U-Boot 2023.01-rc2, aarch64, built Apr 2026**. The 2024 container is
+keyed differently from the firmware (the plaintext bootloader contains no
+`BR0kh`). **[proven]** *(The exact key/scheme of the 2024 container is not
+resolved — its magic string is not adrp-referenced from code, so it sits in
+a build-info struct and the comparator was not traced.)*
+
+**The kernel FIT is hash-only — no signature.** The shipped, bootable
+kernel (`sysupgrade-EG1510XS/kernel`, a flattened-image-tree, FDT magic
+`d00dfeed`) was parsed node-for-node:
+
+```
+/ images / kernel@1 → hash1 (crc32), hash2 (sha1)
+/ images / fdt@1    → hash1 (crc32), hash2 (sha1)
+/ configurations / config@1   — no signature subnode
+```
+
+There is **no `signature` node, no `key-name-hint`, no `rsa`/`ecdsa`
+`algo`** — only CRC32 and SHA1 integrity hashes, both trivially
+recomputable by anyone who alters the image. A U-boot built with FIT
+signature enforcement (`CONFIG_FIT_SIGNATURE` + a `required` key) refuses
+to boot a config with no signature; this device boots this image, so
+**U-boot is not enforcing kernel signatures.** The bootloader carries the
+generic FIT `signature`/`key-name-hint`/`required`/`Verifying Hash
+Integrity` library strings, but there is **no embedded public key** for
+them to use — they are compiled-in library code, not an active root of
+trust. **[proven — by the shipped FIT plus the boot-succeeds contradiction]**
+
+**The recovery fetch is unauthenticated.** Two recovery paths in the
+bootloader:
+
+- **Cloud recovery** queries `deviceapi.ruijienetworks.com` over **plaintext
+  `http://`** (no `https://` URL appears anywhere in the bootloader), via
+  `wget_with_dns`, and takes both the firmware `downloadUrl` **and** the
+  expected `sha256` from that HTTP response
+  (`download bin sha256sum: %s, not equal to reply sha256sum: %s`). A hash
+  delivered over the same unauthenticated channel as the image it
+  "verifies" provides integrity against corruption, not authenticity: an
+  on-path attacker (DNS spoof, rogue gateway, transit MITM) who answers the
+  HTTP request supplies both the image and its expected hash. **[proven
+  from strings]**
+- **Factory recovery** fetches `rgos.bin` over **TFTP** from `192.168.64.1`
+  (`[SYSTEM-RECOVERY] … tftpboot %s:%s`) — unauthenticated by construction.
+  **[proven from strings]**
+
+**Net.** Because the kernel FIT carries no signature and U-boot enforces
+none, an image delivered by either recovery path — or any write to the
+boot partition — boots as long as its CRC32/SHA1 hashes are valid, which an
+attacker controlling the image computes freely. The server-supplied SHA-256
+in cloud recovery adds nothing against tampering. So the flagship's
+boot/update trust is **transport + integrity hash, with no image
+authenticity** at the U-boot layer.
+
+**The one thing firmware cannot show, stated plainly.** MediaTek SoCs can
+enforce a BROM→BL2 secure-boot chain using **efuse**-burned keys that
+verify BL2/U-boot before the kernel stage — the bootloader does carry
+`bl2_verify` and `mtk_efuse_read/write`. Whether that chain is *provisioned
+and fused* on shipping units cannot be determined from a firmware image
+(the keys live in ROM/efuse, not the image). But note it would not change
+this finding: even a hardware-verified BL2/U-boot hands off to a kernel it
+verifies **only by hash** here, so the kernel/rootfs an attacker substitutes
+still boots. Confirming whether efuse secure boot is even enabled, and
+tracing the `do_mtkupgrade` / `cloud_recovery` flash gate end-to-end, would
+require hardware — the natural place this moves from static analysis to a
+bench.
 
 ## 4. Recommendations
 

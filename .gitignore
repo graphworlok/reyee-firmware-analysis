@@ -8,3 +8,11 @@
 rootfs*/
 fw*/
 binaries/
+
+# Vendor firmware distribution folders (images, release notes, metadata)
+# kept out of git exactly like the other firmware — present only on the host.
+Ruijie*Firmware/
+
+# Vendor firmware upgrade bundles (zips of images + release notes)
+Firmware_Bundles/
+*.zip
