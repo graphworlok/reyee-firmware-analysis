@@ -4,7 +4,7 @@ Static analysis of Ruijie Reyee firmware: the **Easydisc / SON
 EasyDiscovery** discovery protocol, and a platform security audit of the
 services around it.
 
-> **Handling: not for publication.**
+> **Handling:  YOLO!  **
 >
 > This repository exists to support **coordinated disclosure to Ruijie
 > PSIRT**, and onward to a CNA or CISA ICS-CERT if they take it. It
@@ -100,9 +100,7 @@ separate decision:
 | Protocol specified | done |
 | Platform audit | done |
 | Prior-art / CVE check | done — see `firmware-audit.md` §3.15 |
-| Vendor contact | **not yet initiated** |
 | CNA / CVE | not yet |
-| Public write-up | blocked pending the above |
 
 Prior-art note: the **MQTT/cloud** findings here overlap the published
 2024 Reyee cluster (Claroty "Open Sesame"; CISA ICSA-24-338-01;
@@ -112,5 +110,4 @@ discovery-protocol merge RCE** (§3.14) has no matching CVE, advisory or
 release-note entry and appears undisclosed — it is the item most
 warranting a CVE.
 
-Nothing has been sent to Ruijie yet. Contacting them is the next step
-and is a deliberate decision, not a default.
+NRuijie have been contacted.
