@@ -1,13 +1,11 @@
 # Easydisc (SON EasyDiscovery) — protocol specification and security analysis
 
-**Handling: not for publication.** This document exists to support
+**Status: public since 2026-11-15** (owner's decision). Written to support
 coordinated disclosure to Ruijie PSIRT, and onward to a CNA / CISA
-ICS-CERT if they take it. Nothing here should be posted publicly or
-shared outside that channel without an explicit decision to do so. See
-§10 for what is and is not a vulnerability claim.
+ICS-CERT if they take it. See §10 for what is and is not a vulnerability claim.
 
 The malware family observed exploiting this protocol in the wild is
-documented separately, in the private `cve-2021-35394-ecosystem`
+documented separately, in the `cve-2021-35394-ecosystem`
 repository (`analysis/geico/README.md`). That material is research with
 a different audience and is deliberately **not** part of this
 repository. This file is the protocol itself: what a vendor or CERT

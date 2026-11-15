@@ -11,10 +11,8 @@ services around it.
 > contains live credential material extracted from shipping firmware and
 > an undisclosed remote code-execution chain against a current product.
 >
-> Nothing here is to be posted publicly, pasted into a public issue
-> tracker, or shared outside that channel without an explicit decision.
-> The repository is private and must stay private until disclosure is
-> agreed and complete.
+> The repository was kept private until **2026-11-15**, when the owner
+> made it public.
 
 ## Contents
 

@@ -22,9 +22,9 @@ This repository is deliberately self-contained: a session can be
 dedicated entirely to it without loading the malware research it was
 split out of.
 
-> **Handling: not for publication.** Coordinated disclosure to Ruijie
-> PSIRT only. Live credential material and an undisclosed RCE chain
-> are in `firmware-audit.md`. Keep this repo private.
+> **Public since 2026-11-15** (owner's decision). Prepared for coordinated
+> disclosure to Ruijie PSIRT; credential material and the RCE chain are in
+> `firmware-audit.md`.
 
 ## 1. Where everything is
 
@@ -324,7 +324,7 @@ without an explicit decision:
 
 ## 6. Relationship to the other repo
 
-`cve-2021-35394-ecosystem` (private) holds the malware research,
+`cve-2021-35394-ecosystem` holds the malware research,
 including `analysis/geico/README.md` — the family observed exploiting
 UDP/43562 in the wild since 2026-08-13. That doc explains what the
 attacker does; this repo explains what the product does. Cross-
